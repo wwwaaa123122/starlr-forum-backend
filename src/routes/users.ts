@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 import type { AppEnv } from '../types';
 import { errors, ok } from '../lib/http';
 import { paginationSchema, paginationMeta } from '../lib/validate';
+import { RATE_LIMITS, clientFingerprint, consumeRateLimit } from '../lib/rate-limit';
 
 const app = new Hono<AppEnv>();
 
@@ -10,11 +11,31 @@ async function findUser(c: { env: AppEnv['Bindings'] }, username: string) {
   return c.env.DB.prepare(
     `SELECT id, uid, username, username_raw, nickname, avatar_url, bio, role, status,
             post_count, reply_count, created_at
-     FROM users WHERE username = ? OR username_raw = ? LIMIT 1`,
+     FROM users WHERE username = ? OR username_raw = ? OR nickname = ? LIMIT 1`,
   )
-    .bind(username.toLowerCase(), username)
+    .bind(username.toLowerCase(), username, username)
     .first<Record<string, unknown>>();
 }
+
+/** 用户搜索（@ 提及自动补全）：按用户名/昵称前缀匹配，公开但限流 */
+app.get('/search', async (c) => {
+  const q = (c.req.query('q') ?? '').trim().slice(0, 32);
+  if (q.length < 1) return ok(c, { users: [] });
+  const rl = await consumeRateLimit(c.env, RATE_LIMITS.search, await clientFingerprint(c));
+  if (!rl.ok) throw errors.tooMany('搜索过于频繁');
+
+  const like = `${q.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
+  const { results } = await c.env.DB.prepare(
+    `SELECT username_raw AS username, nickname, avatar_url AS avatarUrl, role
+     FROM users
+     WHERE status = 'active' AND (username LIKE ? ESCAPE '\\' OR nickname LIKE ? ESCAPE '\\')
+     ORDER BY CASE WHEN username LIKE ? THEN 0 ELSE 1 END, post_count DESC
+     LIMIT 8`,
+  )
+    .bind(like.toLowerCase(), like, like.toLowerCase())
+    .all();
+  return ok(c, { users: results ?? [] });
+});
 
 app.get('/:username', async (c) => {
   const username = c.req.param('username');

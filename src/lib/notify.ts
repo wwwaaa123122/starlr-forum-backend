@@ -54,11 +54,15 @@ export async function notifyMentions(
   const names = extractMentions(content);
   if (names.length === 0) return;
 
-  const placeholders = names.map(() => '?').join(',');
+  // 用户名（不区分大小写）与昵称（原样）都能命中
+  const lower = [...new Set(names.map((n) => n.toLowerCase()))];
+  const originals = [...new Set(names)];
+  const ph = (n: number) => Array.from({ length: n }, () => '?').join(',');
   const { results } = await env.DB.prepare(
-    `SELECT id, username FROM users WHERE username IN (${placeholders}) AND status = 'active'`,
+    `SELECT id, username FROM users
+     WHERE status = 'active' AND (LOWER(username) IN (${ph(lower.length)}) OR nickname IN (${ph(originals.length)}))`,
   )
-    .bind(...names)
+    .bind(...lower, ...originals)
     .all<{ id: string; username: string }>();
   if (!results || results.length === 0) return;
 

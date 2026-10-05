@@ -9,9 +9,8 @@ export const MAX_MENTIONS = 5;
 export function extractMentions(content: string, limit = MAX_MENTIONS): string[] {
   const found = new Set<string>();
   for (const match of content.matchAll(MENTION_RE)) {
-    const name = match[1].toLowerCase();
-    // 排除常见误伤（如邮箱片段）— 简化处理：前后是字母数字则跳过由调用方在入库前决定
-    found.add(name);
+    // 保留原始大小写：昵称区分大小写匹配；用户名匹配时由调用方转小写
+    found.add(match[1]);
     if (found.size >= limit) break;
   }
   return [...found];
