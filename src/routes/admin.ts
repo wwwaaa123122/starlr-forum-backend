@@ -648,8 +648,19 @@ app.get('/reports', requireRole('moderator', 'admin'), async (c) => {
   const { results } = await c.env.DB.prepare(
     `SELECT r.id, r.target_type AS targetType, r.target_id AS targetId, r.reason, r.detail,
             r.status, r.resolution_note AS resolutionNote, r.created_at AS createdAt, r.handled_at AS handledAt,
-            ru.username_raw AS reporterName
-     FROM reports r JOIN users ru ON ru.id = r.reporter_id
+            ru.username_raw AS reporterName,
+            CASE r.target_type WHEN 'post' THEN p.title WHEN 'reply' THEN substr(rp.content, 1, 200) ELSE u2.username_raw END AS targetTitle,
+            CASE r.target_type WHEN 'post' THEN substr(p.content, 1, 200) WHEN 'reply' THEN substr(rp.content, 1, 200) ELSE '' END AS targetContent,
+            CASE r.target_type WHEN 'post' THEN pu.username_raw WHEN 'reply' THEN ru2.username_raw ELSE u2.username_raw END AS targetAuthorName,
+            CASE r.target_type WHEN 'post' THEN p.author_id WHEN 'reply' THEN rp.author_id ELSE r.target_id END AS targetUserId,
+            CASE r.target_type WHEN 'post' THEN p.is_deleted WHEN 'reply' THEN rp.is_deleted ELSE 0 END AS targetDeleted
+     FROM reports r
+     JOIN users ru ON ru.id = r.reporter_id
+     LEFT JOIN posts p ON r.target_type = 'post' AND p.id = r.target_id
+     LEFT JOIN replies rp ON r.target_type = 'reply' AND rp.id = r.target_id
+     LEFT JOIN users pu ON pu.id = p.author_id
+     LEFT JOIN users ru2 ON ru2.id = rp.author_id
+     LEFT JOIN users u2 ON r.target_type = 'user' AND u2.id = r.target_id
      ${whereSql} ORDER BY r.created_at DESC LIMIT ? OFFSET ?`,
   )
     .bind(...params, pageSize, offset)
@@ -657,7 +668,12 @@ app.get('/reports', requireRole('moderator', 'admin'), async (c) => {
   return ok(c, { reports: results ?? [], pagination: paginationMeta(page, pageSize, countRow?.total ?? 0) });
 });
 
-const handleReportSchema = z.object({ note: z.string().trim().max(500).default('') });
+const handleReportSchema = z.object({
+  /** 处理动作：无违规 / 禁言 / 封禁 / 删除内容 */
+  action: z.enum(['dismiss', 'mute', 'ban', 'delete_content']).default('dismiss'),
+  note: z.string().trim().max(500).default(''),
+  days: z.number().int().min(1).max(3650).nullable().optional(),
+});
 
 app.post('/reports/:id/resolve', requireRole('moderator', 'admin'), async (c) => {
   const admin = c.get('user')!;
@@ -669,13 +685,86 @@ app.post('/reports/:id/resolve', requireRole('moderator', 'admin'), async (c) =>
   if (!report) throw errors.notFound('举报不存在');
   if (report.status !== 'pending') throw errors.badRequest('举报已被处理');
 
-  await c.env.DB.prepare(
-    `UPDATE reports SET status = 'resolved', handled_by = ?, handled_at = ?, resolution_note = ? WHERE id = ?`,
+  // 定位被举报内容与其作者（举报用户时 target 即用户）
+  const target = await c.env.DB.prepare(
+    `SELECT r.target_type AS targetType, r.target_id AS targetId,
+            p.author_id AS postAuthor, rp.author_id AS replyAuthor
+     FROM reports r
+     LEFT JOIN posts p ON r.target_type = 'post' AND p.id = r.target_id
+     LEFT JOIN replies rp ON r.target_type = 'reply' AND rp.id = r.target_id
+     WHERE r.id = ?`,
   )
-    .bind(admin.id, nowIso(), body.note, reportId)
+    .bind(reportId)
+    .first<{ targetType: string; targetId: string; postAuthor: string | null; replyAuthor: string | null }>();
+  const targetUserId = target?.targetType === 'user' ? target.targetId : (target?.postAuthor ?? target?.replyAuthor);
+
+  let finalNote = body.note;
+
+  if (body.action === 'mute' || body.action === 'ban') {
+    if (!targetUserId) throw errors.badRequest('找不到被举报内容的作者', 'TARGET_MISSING');
+    if (targetUserId === admin.id) throw errors.badRequest('不能对自己执行该操作');
+    const t = await c.env.DB.prepare(`SELECT id, role FROM users WHERE id = ?`).bind(targetUserId).first<{ id: string; role: string }>();
+    if (!t) throw errors.notFound('用户不存在');
+    if (t.role === 'admin') throw errors.forbidden('不能对该用户执行该操作');
+
+    const expiresAt = body.action === 'ban' && body.days
+      ? new Date(Date.now() + body.days * 86400_000).toISOString().slice(0, 19).replace('T', ' ')
+      : body.action === 'mute'
+        ? body.days
+          ? new Date(Date.now() + body.days * 86400_000).toISOString().slice(0, 19).replace('T', ' ')
+          : null
+        : null;
+
+    if (body.action === 'mute') {
+      await c.env.DB.prepare(
+        `INSERT INTO bans (id, user_id, type, reason, expires_at, created_by, created_at) VALUES (?, ?, 'mute', ?, ?, ?, ?)`,
+      )
+        .bind(newId(16), targetUserId, body.note || '被举报处理', expiresAt, admin.id, nowIso())
+        .run();
+      await createNotification(c.env, { userId: targetUserId, type: 'moderation', content: `您已被禁言：${body.note || '被举报处理'}` });
+      await writeAuditLog(c, { action: 'admin.user.mute', actorId: admin.id, targetType: 'user', targetId: targetUserId, detail: `${body.note} ${expiresAt ?? 'permanent'}` });
+      finalNote = `[禁言${body.days ? ` ${body.days} 天` : ' 永久'}] ${body.note}`;
+    } else {
+      const expiresAtBan = body.days ? new Date(Date.now() + body.days * 86400_000).toISOString().slice(0, 19).replace('T', ' ') : null;
+      await c.env.DB.batch([
+        c.env.DB.prepare(`UPDATE users SET status = 'banned', updated_at = ? WHERE id = ?`).bind(nowIso(), targetUserId),
+        c.env.DB.prepare(
+          `INSERT INTO bans (id, user_id, type, reason, expires_at, created_by, created_at) VALUES (?, ?, 'ban', ?, ?, ?, ?)`,
+        ).bind(newId(16), targetUserId, body.note || '被举报处理', expiresAtBan, admin.id, nowIso()),
+      ]);
+      await c.env.DB.prepare(
+        `UPDATE refresh_tokens SET revoked_at = ?, revoked_reason = 'user_banned' WHERE user_id = ? AND revoked_at IS NULL`,
+      )
+        .bind(nowIso(), targetUserId)
+        .run();
+      await createNotification(c.env, { userId: targetUserId, type: 'moderation', content: `您的账号已被封禁：${body.note || '被举报处理'}` });
+      await writeAuditLog(c, { action: 'admin.user.ban', actorId: admin.id, targetType: 'user', targetId: targetUserId, detail: `${body.note} ${expiresAtBan ?? 'permanent'}` });
+      finalNote = `[封禁${body.days ? ` ${body.days} 天` : ' 永久'}] ${body.note}`;
+    }
+  } else if (body.action === 'delete_content') {
+    if (target?.targetType === 'post') {
+      await c.env.DB.prepare(`UPDATE posts SET is_deleted = 1, deleted_at = ?, deleted_by = ? WHERE id = ?`)
+        .bind(nowIso(), admin.id, target.targetId)
+        .run();
+    } else if (target?.targetType === 'reply') {
+      await c.env.DB.prepare(`UPDATE replies SET is_deleted = 1, deleted_at = ?, deleted_by = ? WHERE id = ?`)
+        .bind(nowIso(), admin.id, target.targetId)
+        .run();
+    } else if (target?.targetType === 'user') {
+      throw errors.badRequest('用户类型举报请使用禁言或封禁');
+    }
+    await writeAuditLog(c, { action: 'admin.report.delete_content', actorId: admin.id, targetType: target?.targetType ?? 'post', targetId: target?.targetId ?? '', detail: body.note });
+    finalNote = `[删除内容] ${body.note}`;
+  }
+
+  const status = body.action === 'dismiss' ? 'dismissed' : 'resolved';
+  await c.env.DB.prepare(
+    `UPDATE reports SET status = ?, handled_by = ?, handled_at = ?, resolution_note = ? WHERE id = ?`,
+  )
+    .bind(status, admin.id, nowIso(), finalNote, reportId)
     .run();
-  await writeAuditLog(c, { action: 'admin.report.resolve', actorId: admin.id, targetType: 'report', targetId: reportId, detail: body.note });
-  return ok(c, { success: true });
+  await writeAuditLog(c, { action: 'admin.report.resolve', actorId: admin.id, targetType: 'report', targetId: reportId, detail: finalNote });
+  return ok(c, { success: true, action: body.action });
 });
 
 app.post('/reports/:id/dismiss', requireRole('moderator', 'admin'), async (c) => {
