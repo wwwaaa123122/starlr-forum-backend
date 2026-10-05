@@ -20,8 +20,6 @@ export interface Env {
   TURNSTILE_SITE_KEY?: string;
   /** 发件人（Resend），如：星辰旅人论坛 <no-reply@182030.xyz> */
   MAIL_FROM?: string;
-  /** 管理员告警收件邮箱 */
-  ADMIN_EMAIL?: string;
   /** 'memory'：邮件写入内存 outbox（测试/本地），未设置则走 Resend */
   MAIL_TRANSPORT?: string;
 

@@ -44,8 +44,7 @@
     "REFRESH_TOKEN_TTL": "2592000",
     "PASSWORD_ITERATIONS": "100000",
     "TURNSTILE_SITE_KEY": "0x4AAAAAAFOSQFHmv_Mdvjrg",
-    "MAIL_FROM": "星辰旅人论坛 <no-reply@182030.xyz>",
-    "ADMIN_EMAIL": "wwwaaa123122@outlook.com"
+    "MAIL_FROM": "星辰旅人论坛 <no-reply@182030.xyz>"
   },
   // 生产密钥通过 wrangler secret put 设置：
   //   JWT_SIGNING_KEYS  : JSON [{ "kid": "...", "jwk": {...}, "active": true }]（RS256 私钥 JWK，禁止入库/硬编码）

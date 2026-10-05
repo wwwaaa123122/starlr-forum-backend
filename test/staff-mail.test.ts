@@ -215,6 +215,37 @@ describe('密码重置（Resend 邮件）', () => {
   });
 });
 
+describe('邮件使用昵称', () => {
+  it('注册昵称出现在欢迎邮件；修改昵称后后续邮件使用新昵称', async () => {
+    __clearMailOutbox();
+    const user = await createUser({ username: 'nickmailuser', nickname: '夜航星' });
+
+    const welcome = __getMailOutbox().find((m) => m.subject === '欢迎加入星辰旅人论坛');
+    expect(welcome).toBeTruthy();
+    expect(welcome!.html).toContain('夜航星');
+
+    // 昵称可随时修改
+    const patched = await req('/api/me', { method: 'PATCH', token: user.accessToken, body: { nickname: '晨光旅人' } });
+    expect(patched.status).toBe(200);
+
+    __clearMailOutbox();
+    await req('/api/auth/forgot-password', { method: 'POST', body: { email: user.email } });
+    const reset = __getMailOutbox().find((m) => m.subject === '重置你的密码');
+    expect(reset).toBeTruthy();
+    expect(reset!.html).toContain('晨光旅人');
+    expect(reset!.html).not.toContain('夜航星');
+  });
+
+  it('不填昵称时默认使用用户名', async () => {
+    __clearMailOutbox();
+    const user = await createUser({ username: 'nonickname' });
+    const welcome = __getMailOutbox().find((m) => m.subject === '欢迎加入星辰旅人论坛');
+    expect(welcome!.html).toContain('nonickname');
+    const me = await req('/api/me', { token: user.accessToken });
+    expect(me.body.user.nickname).toBe('nonickname');
+  });
+});
+
 describe('修改密码（登录态）', () => {
   it('当前密码错误被拒绝；成功后旧密码失效、旧 Refresh Token 失效', async () => {
     const user = await createUser({ username: 'changpwuser' });
@@ -279,9 +310,12 @@ describe('管理员邮件告警', () => {
     const mails = __getMailOutbox();
     const alert = mails.find((m) => m.subject.startsWith('[论坛管理]'));
     expect(alert).toBeTruthy();
-    // ADMIN_EMAIL 绑定值 + 管理员用户邮箱都在收件列表
-    expect(alert!.to).toContain('admin-alert@test.local');
-    expect(alert!.to).toContain(admin.email);
+    // 告警发送至 UID 1（站长）的邮箱
+    const owner = await (env.DB as unknown as D1Database)
+      .prepare('SELECT email FROM users WHERE uid = 1')
+      .first<{ email: string }>();
+    expect(owner?.email).toBeTruthy();
+    expect(alert!.to).toContain(owner!.email);
   });
 
   it('授予管理员权限时向目标用户发送邮件通知', async () => {

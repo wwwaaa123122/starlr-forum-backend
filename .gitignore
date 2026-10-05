@@ -1,0 +1,16 @@
+# 依赖与构建
+node_modules/
+.wrangler/
+dist/
+coverage/
+
+# 密钥与本地配置（绝不提交）
+.dev.vars
+*.pem
+*.key
+secrets/
+.env
+*.local
+
+# 系统文件
+.DS_Store

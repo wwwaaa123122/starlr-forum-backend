@@ -96,15 +96,24 @@ export async function sendEmail(env: Env, to: string | string[], subject: string
   }
 }
 
-/** 管理员告警邮箱：ADMIN_EMAIL + 所有 admin 用户邮箱（去重） */
+/**
+ * 管理告警收件人：优先 UID 1（站长）的邮箱；
+ * UID 1 不存在或邮箱无效时，回退到其他在职管理员邮箱。
+ */
 export async function adminRecipients(env: Env): Promise<string[]> {
   const emails = new Set<string>();
-  if (env.ADMIN_EMAIL) emails.add(env.ADMIN_EMAIL.trim().toLowerCase());
   try {
-    const { results } = await env.DB.prepare(
-      `SELECT email FROM users WHERE role = 'admin' AND status = 'active' AND email LIKE '%_@_%._%' LIMIT 5`,
-    ).all<{ email: string }>();
-    for (const r of results ?? []) emails.add(r.email.toLowerCase());
+    const owner = await env.DB.prepare(
+      `SELECT email FROM users WHERE uid = 1 AND status = 'active' AND email LIKE '%_@_%._%' LIMIT 1`,
+    ).first<{ email: string }>();
+    if (owner?.email) emails.add(owner.email.toLowerCase());
+
+    if (emails.size === 0) {
+      const { results } = await env.DB.prepare(
+        `SELECT email FROM users WHERE role = 'admin' AND status = 'active' AND email LIKE '%_@_%._%' ORDER BY uid ASC LIMIT 3`,
+      ).all<{ email: string }>();
+      for (const r of results ?? []) emails.add(r.email.toLowerCase());
+    }
   } catch {
     // 数据库异常时不阻塞告警
   }

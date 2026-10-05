@@ -52,13 +52,18 @@ export interface TestUser {
 
 let userSeq = 0;
 
-export async function createUser(overrides: Partial<{ username: string; email: string; password: string }> = {}): Promise<TestUser> {
+export async function createUser(
+  overrides: Partial<{ username: string; email: string; password: string; nickname: string }> = {},
+): Promise<TestUser> {
   userSeq++;
   const username = overrides.username ?? `user${userSeq}_${Math.random().toString(36).slice(2, 6)}`;
   const email = overrides.email ?? `${username}@test.local`;
   const password = overrides.password ?? 'TestPass2026!';
 
-  const res = await req('/api/auth/register', { method: 'POST', body: { username, email, password } });
+  const res = await req('/api/auth/register', {
+    method: 'POST',
+    body: { username, email, password, ...(overrides.nickname ? { nickname: overrides.nickname } : {}) },
+  });
   if (res.status !== 201) throw new Error(`注册失败: ${res.status} ${JSON.stringify(res.body)}`);
   return {
     id: res.body.user.id,

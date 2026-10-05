@@ -10,7 +10,8 @@
     "db:migrate:local": "wrangler d1 migrations apply xingchen-forum-db --local",
     "db:migrate:remote": "wrangler d1 migrations apply xingchen-forum-db --remote",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "generate:keys": "node scripts/generate-jwt-keys.mjs"
   },
   "dependencies": {
     "hono": "^4.6.0",

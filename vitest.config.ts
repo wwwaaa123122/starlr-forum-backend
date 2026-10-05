@@ -34,7 +34,6 @@ export default defineWorkersConfig(async () => {
               JWT_SIGNING_KEYS: signingKeys,
               TURNSTILE_DISABLED: 'true',
               MAIL_TRANSPORT: 'memory',
-              ADMIN_EMAIL: 'admin-alert@test.local',
               MAIL_FROM: '星辰旅人论坛测试 <no-reply@test.local>',
               PASSWORD_ITERATIONS: '1000',
               JWT_ISSUER: 'https://forum.test',

@@ -29,14 +29,16 @@ const staffSchema = z.object({
   role: z.enum(['admin', 'moderator']).default('admin'),
 });
 
-/** 当前管理员/版主列表 */
+/** 当前管理员/版主列表（ownerEmail = UID 1 的邮箱，管理告警收件人） */
 app.get('/admins', async (c) => {
   const { results } = await c.env.DB.prepare(
     `SELECT id, uid, username_raw AS username, email, nickname, role, created_at AS createdAt, last_login_at AS lastLoginAt
      FROM users WHERE role IN ('admin', 'moderator') AND status = 'active'
      ORDER BY (role = 'admin') DESC, uid ASC`,
   ).all();
-  return ok(c, { admins: results ?? [], adminEmail: c.env.ADMIN_EMAIL ?? null });
+  const owner = await c.env.DB.prepare(`SELECT email FROM users WHERE uid = 1 AND status = 'active' LIMIT 1`)
+    .first<{ email: string }>();
+  return ok(c, { admins: results ?? [], ownerEmail: owner?.email ?? null });
 });
 
 /** 指定 UID 授予管理员/版主权限 */
