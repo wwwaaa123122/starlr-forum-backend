@@ -49,6 +49,7 @@ export async function req<T = any>(
 
 export interface TestUser {
   id: string;
+  uid: number;
   username: string;
   email: string;
   password: string;
@@ -73,6 +74,7 @@ export async function createUser(
   if (res.status !== 201) throw new Error(`注册失败: ${res.status} ${JSON.stringify(res.body)}`);
   return {
     id: res.body.user.id,
+    uid: res.body.user.uid,
     username,
     email,
     password,

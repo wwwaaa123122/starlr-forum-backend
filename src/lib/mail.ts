@@ -51,7 +51,7 @@ function emailShell(title: string, bodyHtml: string, siteUrl: string): string {
       <div style="font-size:14px;line-height:1.7;color:#3f3f46;">${bodyHtml}</div>
       <hr style="border:none;border-top:1px solid #e4e4e7;margin:24px 0;" />
       <p style="margin:0;font-size:12px;color:#a1a1aa;">
-        星辰旅人论坛 · <a href="${siteUrl}" style="color:#4f46e5;">${siteUrl.replace(/^https?:\/\//, '')}</a><br/>
+        Starlr Forum · <a href="${siteUrl}" style="color:#4f46e5;">${siteUrl.replace(/^https?:\/\//, '')}</a><br/>
         如果这不是你的操作，请忽略此邮件。
       </p>
     </div>
@@ -76,7 +76,7 @@ export async function sendEmail(env: Env, to: string | string[], subject: string
     console.warn('[mail] RESEND_API_KEY 未配置，跳过发送:', subject);
     return false;
   }
-  const from = env.MAIL_FROM || '星辰旅人论坛 <no-reply@182030.xyz>';
+  const from = env.MAIL_FROM || 'Starlr Forum <no-reply@182030.xyz>';
 
   try {
     const res = await fetch('https://api.resend.com/emails', {

@@ -1,5 +1,5 @@
 /**
- * 星辰旅人论坛 — Cloudflare Worker 入口
+ * Starlr Forum（星辰旅人论坛）— Cloudflare Worker 入口
  *
  * 职责分层：
  *   middleware/  认证与权限
@@ -82,7 +82,7 @@ app.get('/api/health', (c) => c.json({ status: 'ok', time: new Date().toISOStrin
 // 公开站点配置（前端启动时获取 Turnstile site key 等）
 app.get('/api/config', (c) => {
   return c.json({
-    siteName: '星辰旅人论坛',
+    siteName: 'Starlr Forum',
     turnstileSiteKey: c.env.TURNSTILE_SITE_KEY || null,
     registrationEnabled: true,
   });

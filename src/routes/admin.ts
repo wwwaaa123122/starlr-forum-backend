@@ -14,6 +14,7 @@ import { writeAuditLog } from '../lib/audit';
 import { createNotification } from '../lib/notify';
 import { sendEmail } from '../lib/mail';
 import { CATEGORY_CACHE_KEY } from './categories';
+import { RATE_LIMITS, consumeRateLimit } from '../lib/rate-limit';
 
 const app = new Hono<AppEnv>();
 
@@ -448,13 +449,76 @@ const categorySchema = z.object({
     .max(32)
     .regex(/^[a-z0-9-]+$/, 'slug 只能包含小写字母、数字和短横线'),
   description: z.string().trim().max(200).default(''),
-  icon: z.string().trim().max(8).default(''),
+  icon: z
+    .string()
+    .trim()
+    .max(500)
+    .default('')
+    .refine(
+      (v) =>
+        v === '' ||
+        // emoji / 任意短字符（≤8），或图片 URL（http/https 或站内 /api/files/、/api/avatars/）
+        v.length <= 8 ||
+        /^(https?:\/\/|\/api\/(files|avatars)\/)/.test(v),
+      { message: '图标只能是 emoji 或图片地址' },
+    ),
   sortOrder: z.number().int().min(0).max(9999).default(0),
 });
 
 async function invalidateCategoryCache(c: { env: AppEnv['Bindings'] }) {
   await c.env.CACHE.delete(CATEGORY_CACHE_KEY);
 }
+
+/** 系统通知：全部用户或指定 UID（content 存 JSON，前端解析渲染） */
+const notifySchema = z.object({
+  title: z.string().trim().min(1).max(100),
+  body: z.string().trim().max(500).default(''),
+  link: z
+    .string()
+    .trim()
+    .max(300)
+    .default('')
+    .refine((v) => v === '' || v.startsWith('/') || /^https?:\/\//.test(v), { message: '链接必须是站内路径或 http(s) 地址' }),
+  target: z.union([z.literal('all'), z.coerce.number().int().positive()]).default('all'),
+});
+
+app.post('/notifications', requireAdmin, async (c) => {
+  const admin = c.get('user')!;
+  const rl = await consumeRateLimit(c.env, RATE_LIMITS.notify, admin.id);
+  if (!rl.ok) throw errors.tooMany('发送过于频繁，请稍后再试');
+  const body = await parseJson(c, notifySchema);
+
+  let recipients: Array<{ id: string }>;
+  if (body.target === 'all') {
+    const { results } = await c.env.DB.prepare(`SELECT id FROM users WHERE status = 'active'`).all<{ id: string }>();
+    recipients = results ?? [];
+  } else {
+    const user = await c.env.DB.prepare(`SELECT id FROM users WHERE uid = ? AND status = 'active'`)
+      .bind(body.target)
+      .first<{ id: string }>();
+    if (!user) throw errors.notFound('目标用户不存在（UID 无效或已封禁）', 'UID_NOT_FOUND');
+    recipients = [user];
+  }
+  if (recipients.length === 0) return ok(c, { created: 0 });
+
+  const content = JSON.stringify({ title: body.title, body: body.body, link: body.link || undefined });
+  const now = nowIso();
+  const stmts = recipients.map((r) =>
+    c.env.DB.prepare(
+      `INSERT INTO notifications (id, user_id, actor_id, type, content, is_read, created_at)
+       VALUES (?, ?, ?, 'system', ?, 0, ?)`,
+    ).bind(newId(16), r.id, admin.id, content, now),
+  );
+  await c.env.DB.batch(stmts);
+  await writeAuditLog(c, {
+    action: 'admin.notification.send',
+    actorId: admin.id,
+    targetType: 'notification',
+    targetId: body.target === 'all' ? 'all' : String(body.target),
+    detail: body.title,
+  });
+  return ok(c, { created: recipients.length }, { status: 201 });
+});
 
 app.post('/categories', requireAdmin, async (c) => {
   const admin = c.get('user')!;

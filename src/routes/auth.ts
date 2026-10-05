@@ -128,7 +128,7 @@ app.post('/register', async (c) => {
   await sendEmail(
     c.env,
     email,
-    '欢迎加入星辰旅人论坛',
+    '欢迎加入 Starlr Forum',
     `<p>你好，<strong>${escapeHtml(nickname)}</strong>！</p>
      <p>你的账号已创建成功：</p>
      <ul>

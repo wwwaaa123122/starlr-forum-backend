@@ -18,7 +18,7 @@ export interface Env {
   ALLOWED_ORIGINS?: string;
   /** Turnstile 站点密钥（公开，可暴露给前端） */
   TURNSTILE_SITE_KEY?: string;
-  /** 发件人（Resend），如：星辰旅人论坛 <no-reply@182030.xyz> */
+  /** 发件人（Resend），如：Starlr Forum <no-reply@182030.xyz> */
   MAIL_FROM?: string;
   /** 'memory'：邮件写入内存 outbox（测试/本地），未设置则走 Resend */
   MAIL_TRANSPORT?: string;

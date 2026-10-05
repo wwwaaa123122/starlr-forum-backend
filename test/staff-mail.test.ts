@@ -207,7 +207,7 @@ describe('密码重置（Resend 邮件）', () => {
     __clearMailOutbox();
     const user = await createUser({ username: 'welcomecheck' });
     const mails = __getMailOutbox();
-    const welcome = mails.find((m) => m.subject === '欢迎加入星辰旅人论坛');
+    const welcome = mails.find((m) => m.subject === '欢迎加入 Starlr Forum');
     expect(welcome).toBeTruthy();
     expect(welcome!.to).toContain(user.email);
     const me = await req('/api/me', { token: user.accessToken });
@@ -220,7 +220,7 @@ describe('邮件使用昵称', () => {
     __clearMailOutbox();
     const user = await createUser({ username: 'nickmailuser', nickname: '夜航星' });
 
-    const welcome = __getMailOutbox().find((m) => m.subject === '欢迎加入星辰旅人论坛');
+    const welcome = __getMailOutbox().find((m) => m.subject === '欢迎加入 Starlr Forum');
     expect(welcome).toBeTruthy();
     expect(welcome!.html).toContain('夜航星');
 
@@ -239,7 +239,7 @@ describe('邮件使用昵称', () => {
   it('不填昵称时默认使用用户名', async () => {
     __clearMailOutbox();
     const user = await createUser({ username: 'nonickname' });
-    const welcome = __getMailOutbox().find((m) => m.subject === '欢迎加入星辰旅人论坛');
+    const welcome = __getMailOutbox().find((m) => m.subject === '欢迎加入 Starlr Forum');
     expect(welcome!.html).toContain('nonickname');
     const me = await req('/api/me', { token: user.accessToken });
     expect(me.body.user.nickname).toBe('nonickname');
