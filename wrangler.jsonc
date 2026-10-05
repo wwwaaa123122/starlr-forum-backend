@@ -4,6 +4,7 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "xingchen-forum",
   "main": "src/index.ts",
+  "routes": [{ "pattern": "i.182030.xyz", "custom_domain": true }],
   "compatibility_date": "2025-10-01",
   "compatibility_flags": ["nodejs_compat"],
   "assets": {
@@ -36,13 +37,15 @@
   },
   "vars": {
     // 站点标识，用于 JWT iss / OIDC issuer。生产部署后改成实际域名。
-    "SITE_URL": "https://xingchen-forum.wwwaaa123122.workers.dev",
-    "JWT_ISSUER": "https://xingchen-forum.wwwaaa123122.workers.dev",
+    "SITE_URL": "https://i.182030.xyz",
+    "JWT_ISSUER": "https://i.182030.xyz",
     "JWT_AUDIENCE": "api",
     "ACCESS_TOKEN_TTL": "86400",
     "REFRESH_TOKEN_TTL": "2592000",
     "PASSWORD_ITERATIONS": "100000",
-    "TURNSTILE_SITE_KEY": "0x4AAAAAAFOSQFHmv_Mdvjrg"
+    "TURNSTILE_SITE_KEY": "0x4AAAAAAFOSQFHmv_Mdvjrg",
+    "MAIL_FROM": "星辰旅人论坛 <no-reply@182030.xyz>",
+    "ADMIN_EMAIL": "wwwaaa123122@outlook.com"
   },
   // 生产密钥通过 wrangler secret put 设置：
   //   JWT_SIGNING_KEYS  : JSON [{ "kid": "...", "jwk": {...}, "active": true }]（RS256 私钥 JWK，禁止入库/硬编码）

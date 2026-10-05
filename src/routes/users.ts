@@ -8,7 +8,7 @@ const app = new Hono<AppEnv>();
 
 async function findUser(c: { env: AppEnv['Bindings'] }, username: string) {
   return c.env.DB.prepare(
-    `SELECT id, username, username_raw, nickname, avatar_url, bio, role, status,
+    `SELECT id, uid, username, username_raw, nickname, avatar_url, bio, role, status,
             post_count, reply_count, created_at
      FROM users WHERE username = ? OR username_raw = ? LIMIT 1`,
   )
@@ -26,6 +26,7 @@ app.get('/:username', async (c) => {
   return ok(c, {
     user: {
       id: user.id,
+      uid: user.uid ?? null,
       username: user.username_raw,
       nickname: user.nickname,
       avatarUrl: user.avatar_url,

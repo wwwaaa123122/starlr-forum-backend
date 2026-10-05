@@ -12,6 +12,7 @@ import { requireRole } from '../middleware/auth';
 import { newId, nowIso } from '../lib/ids';
 import { writeAuditLog } from '../lib/audit';
 import { createNotification } from '../lib/notify';
+import { sendEmail } from '../lib/mail';
 import { CATEGORY_CACHE_KEY } from './categories';
 
 const app = new Hono<AppEnv>();
@@ -19,6 +20,95 @@ const app = new Hono<AppEnv>();
 app.use('*', requireRole('moderator', 'admin'));
 
 const requireAdmin = requireRole('admin');
+
+// ---------------------------------------------------------------
+// 管理员配置（按 UID 授权，支持多管理员：admin / moderator）
+// ---------------------------------------------------------------
+const staffSchema = z.object({
+  uid: z.number().int().positive().max(999_999_999),
+  role: z.enum(['admin', 'moderator']).default('admin'),
+});
+
+/** 当前管理员/版主列表 */
+app.get('/admins', async (c) => {
+  const { results } = await c.env.DB.prepare(
+    `SELECT id, uid, username_raw AS username, email, nickname, role, created_at AS createdAt, last_login_at AS lastLoginAt
+     FROM users WHERE role IN ('admin', 'moderator') AND status = 'active'
+     ORDER BY (role = 'admin') DESC, uid ASC`,
+  ).all();
+  return ok(c, { admins: results ?? [], adminEmail: c.env.ADMIN_EMAIL ?? null });
+});
+
+/** 指定 UID 授予管理员/版主权限 */
+app.post('/admins', requireAdmin, async (c) => {
+  const actor = c.get('user')!;
+  const body = await parseJson(c, staffSchema);
+
+  const target = await c.env.DB.prepare(`SELECT id, uid, username_raw, email, nickname, role, status FROM users WHERE uid = ?`)
+    .bind(body.uid)
+    .first<{ id: string; uid: number; username_raw: string; email: string; nickname: string; role: string; status: string }>();
+  if (!target) throw errors.notFound(`UID ${body.uid} 对应的用户不存在`, 'UID_NOT_FOUND');
+  if (target.status !== 'active') throw errors.badRequest('该账号已被封禁，无法授予管理权限');
+  if (target.role === body.role) return ok(c, { success: true, unchanged: true, user: { uid: target.uid, role: target.role } });
+
+  await c.env.DB.prepare(`UPDATE users SET role = ?, updated_at = ? WHERE id = ?`).bind(body.role, nowIso(), target.id).run();
+
+  await createNotification(c.env, {
+    userId: target.id,
+    actorId: actor.id,
+    type: 'moderation',
+    content: `你已被授予${body.role === 'admin' ? '管理员' : '版主'}权限`,
+  });
+  await writeAuditLog(c, {
+    action: 'admin.staff.grant',
+    actorId: actor.id,
+    targetType: 'user',
+    targetId: target.id,
+    detail: `UID ${target.uid} → ${body.role}`,
+  });
+  await sendEmail(
+    c.env,
+    target.email,
+    `你已被授予${body.role === 'admin' ? '管理员' : '版主'}权限`,
+    `<p>你好，<strong>${target.nickname}</strong>：</p>
+     <p>你的账号（UID ${target.uid}，@${target.username_raw}）已被授予<strong>${body.role === 'admin' ? '管理员' : '版主'}</strong>权限。</p>
+     <p><a href="${c.env.SITE_URL}/admin">前往管理后台 →</a></p>`,
+  ).catch(() => undefined);
+
+  return ok(c, { success: true, user: { uid: target.uid, username: target.username_raw, role: body.role } });
+});
+
+/** 撤销 UID 的管理权限（降为普通用户） */
+app.delete('/admins/:uid', requireAdmin, async (c) => {
+  const actor = c.get('user')!;
+  const uid = Number.parseInt(c.req.param('uid'), 10);
+  if (!Number.isInteger(uid) || uid <= 0) throw errors.badRequest('UID 不合法');
+
+  const target = await c.env.DB.prepare(`SELECT id, uid, username_raw, email, nickname, role FROM users WHERE uid = ?`)
+    .bind(uid)
+    .first<{ id: string; uid: number; username_raw: string; email: string; nickname: string; role: string }>();
+  if (!target) throw errors.notFound(`UID ${uid} 对应的用户不存在`, 'UID_NOT_FOUND');
+  if (target.role === 'user') return ok(c, { success: true, unchanged: true });
+  if (target.id === actor.id) throw errors.badRequest('不能撤销自己的管理权限');
+
+  // 至少保留一位管理员
+  if (target.role === 'admin') {
+    const adminCount = await c.env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND status = 'active'`,
+    ).first<{ n: number }>();
+    if ((adminCount?.n ?? 0) <= 1) throw errors.badRequest('必须至少保留一位管理员');
+  }
+
+  await c.env.DB.prepare(`UPDATE users SET role = 'user', updated_at = ? WHERE id = ?`).bind(nowIso(), target.id).run();
+  await writeAuditLog(c, {
+    action: 'admin.staff.revoke',
+    actorId: actor.id,
+    targetType: 'user',
+    targetId: target.id,
+    detail: `UID ${target.uid} 撤销 ${target.role}`,
+  });
+  return ok(c, { success: true, user: { uid: target.uid, role: 'user' } });
+});
 
 // ---------------------------------------------------------------
 // 概览
@@ -52,9 +142,12 @@ app.get('/users', async (c) => {
   const where: string[] = [];
   const params: unknown[] = [];
   if (query) {
-    where.push('(username LIKE ? ESCAPE \'\\\' OR nickname LIKE ? ESCAPE \'\\\' OR email LIKE ? ESCAPE \'\\\')');
+    const uidMatch = /^\d{1,9}$/.test(query.trim()) ? Number.parseInt(query.trim(), 10) : -1;
+    where.push(
+      '(username LIKE ? ESCAPE \'\\\' OR nickname LIKE ? ESCAPE \'\\\' OR email LIKE ? ESCAPE \'\\\' OR uid = ?)',
+    );
     const like = `%${query.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
-    params.push(like, like, like);
+    params.push(like, like, like, uidMatch);
   }
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
@@ -62,9 +155,9 @@ app.get('/users', async (c) => {
     .bind(...params)
     .first<{ total: number }>();
   const { results } = await c.env.DB.prepare(
-    `SELECT id, username_raw AS username, email, nickname, role, status, post_count AS postCount,
+    `SELECT id, uid, username_raw AS username, email, nickname, role, status, post_count AS postCount,
             reply_count AS replyCount, created_at AS createdAt, last_login_at AS lastLoginAt
-     FROM users ${whereSql} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+     FROM users ${whereSql} ORDER BY uid ASC LIMIT ? OFFSET ?`,
   )
     .bind(...params, pageSize, offset)
     .all();

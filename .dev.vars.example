@@ -4,6 +4,11 @@
 
 JWT_SIGNING_KEYS=[{"kid":"dev-001","jwk":{"kty":"RSA","n":"...","e":"AQAB","d":"...","p":"...","q":"...","dp":"...","dq":"...","qi":"..."},"active":true}]
 TURNSTILE_DISABLED=true
+
+# 邮件（Resend）：本地默认写内存，不真实外发；生产用 wrangler secret put RESEND_API_KEY
+MAIL_TRANSPORT=memory
+# MAIL_FROM=星辰旅人论坛 <no-reply@182030.xyz>
+# ADMIN_EMAIL=you@example.com
 # 如需本地启用 Turnstile：
 # TURNSTILE_DISABLED=
 # TURNSTILE_SECRET_KEY=0x4AAAAAAA...

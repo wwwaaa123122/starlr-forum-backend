@@ -1,0 +1,136 @@
+/**
+ * 邮件发送（Resend HTTP API）
+ * - 生产：RESEND_API_KEY secret + MAIL_FROM 变量
+ * - 测试/本地：MAIL_TRANSPORT=memory 时消息写入内存 outbox（供自动化测试断言）
+ * - 未配置时静默降级（不阻塞主流程），所有失败仅记录日志
+ */
+import type { Env } from '../types';
+import { sha256Hex } from './ids';
+
+export interface SentEmail {
+  to: string[];
+  subject: string;
+  html: string;
+  text: string;
+}
+
+/** 测试用内存 outbox（仅 MAIL_TRANSPORT=memory 时使用） */
+const outbox: SentEmail[] = [];
+
+/** 仅测试使用：读取已发送邮件 */
+export function __getMailOutbox(): SentEmail[] {
+  return outbox;
+}
+
+/** 仅测试使用：清空 outbox */
+export function __clearMailOutbox(): void {
+  outbox.length = 0;
+}
+
+interface ResendError {
+  message?: string;
+  name?: string;
+}
+
+function textFromHtml(html: string): string {
+  return html
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** 邮件 HTML 外壳（简洁、移动端友好） */
+function emailShell(title: string, bodyHtml: string, siteUrl: string): string {
+  return `<!DOCTYPE html>
+<html><body style="margin:0;padding:0;background:#f4f5f7;font-family:-apple-system,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;">
+  <div style="max-width:560px;margin:0 auto;padding:32px 16px;">
+    <div style="background:#ffffff;border-radius:12px;padding:32px;border:1px solid #e4e4e7;">
+      <h1 style="margin:0 0 16px;font-size:20px;color:#18181b;">${title}</h1>
+      <div style="font-size:14px;line-height:1.7;color:#3f3f46;">${bodyHtml}</div>
+      <hr style="border:none;border-top:1px solid #e4e4e7;margin:24px 0;" />
+      <p style="margin:0;font-size:12px;color:#a1a1aa;">
+        星辰旅人论坛 · <a href="${siteUrl}" style="color:#4f46e5;">${siteUrl.replace(/^https?:\/\//, '')}</a><br/>
+        如果这不是你的操作，请忽略此邮件。
+      </p>
+    </div>
+  </div>
+</body></html>`;
+}
+
+export async function sendEmail(env: Env, to: string | string[], subject: string, bodyHtml: string): Promise<boolean> {
+  const recipients = (Array.isArray(to) ? to : [to]).map((x) => x.trim()).filter(Boolean);
+  if (recipients.length === 0) return false;
+
+  const html = emailShell(subject, bodyHtml, env.SITE_URL);
+  const text = textFromHtml(html);
+
+  if (env.MAIL_TRANSPORT === 'memory') {
+    outbox.push({ to: recipients, subject, html, text });
+    return true;
+  }
+
+  const apiKey = env.RESEND_API_KEY;
+  if (!apiKey) {
+    console.warn('[mail] RESEND_API_KEY 未配置，跳过发送:', subject);
+    return false;
+  }
+  const from = env.MAIL_FROM || '星辰旅人论坛 <no-reply@182030.xyz>';
+
+  try {
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from, to: recipients, subject, html, text }),
+    });
+    if (!res.ok) {
+      const err = (await res.json().catch(() => ({}))) as ResendError;
+      console.error(`[mail] Resend 发送失败 ${res.status}:`, err.message ?? 'unknown');
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error('[mail] Resend 请求异常:', e instanceof Error ? e.message : e);
+    return false;
+  }
+}
+
+/** 管理员告警邮箱：ADMIN_EMAIL + 所有 admin 用户邮箱（去重） */
+export async function adminRecipients(env: Env): Promise<string[]> {
+  const emails = new Set<string>();
+  if (env.ADMIN_EMAIL) emails.add(env.ADMIN_EMAIL.trim().toLowerCase());
+  try {
+    const { results } = await env.DB.prepare(
+      `SELECT email FROM users WHERE role = 'admin' AND status = 'active' AND email LIKE '%_@_%._%' LIMIT 5`,
+    ).all<{ email: string }>();
+    for (const r of results ?? []) emails.add(r.email.toLowerCase());
+  } catch {
+    // 数据库异常时不阻塞告警
+  }
+  return [...emails];
+}
+
+/** 发送管理员告警（任一收件失败不影响其他收件人） */
+export async function sendAdminAlert(env: Env, subject: string, bodyHtml: string): Promise<void> {
+  const recipients = await adminRecipients(env);
+  if (recipients.length === 0) return;
+  await sendEmail(env, recipients, `[论坛管理] ${subject}`, bodyHtml);
+}
+
+/** 生成密码重置令牌并返回（明文只出现一次：邮件里） */
+export async function createPasswordResetToken(env: Env, userId: string): Promise<string> {
+  const token = crypto.randomUUID().replace(/-/g, '') + crypto.randomUUID().replace(/-/g, '');
+  const tokenHash = await sha256Hex(token);
+  await env.CACHE.put(`pwreset:${tokenHash}`, userId, { expirationTtl: 1800 }); // 30 分钟
+  return token;
+}
+
+/** 校验并消费密码重置令牌，返回 user_id（一次性） */
+export async function consumePasswordResetToken(env: Env, token: string): Promise<string | null> {
+  const tokenHash = await sha256Hex(token);
+  const userId = await env.CACHE.get(`pwreset:${tokenHash}`);
+  if (!userId) return null;
+  await env.CACHE.delete(`pwreset:${tokenHash}`);
+  return userId;
+}

@@ -14,6 +14,7 @@ import { RATE_LIMITS, clientFingerprint, consumeRateLimit } from '../lib/rate-li
 import { verifyTurnstile } from '../lib/turnstile';
 import { requireAuth } from '../middleware/auth';
 import { writeAuditLog } from '../lib/audit';
+import { sendEmail, consumePasswordResetToken, createPasswordResetToken } from '../lib/mail';
 
 const app = new Hono<AppEnv>();
 
@@ -52,6 +53,7 @@ function deviceInfoFrom(c: { req: { header: (n: string) => string | undefined } 
 function publicUser(user: Record<string, unknown>) {
   return {
     id: user.id,
+    uid: user.uid ?? null,
     username: user.username_raw ?? user.username,
     nickname: user.nickname,
     avatarUrl: user.avatar_url ?? null,
@@ -96,17 +98,45 @@ app.post('/register', async (c) => {
   const userId = newId(16);
   const nickname = body.nickname?.trim() || body.username;
 
+  // UID：从 1 开始自增（counters 表原子分配）
+  let uid: number | null = null;
+  const uidRow = await c.env.DB.prepare(`UPDATE counters SET value = value + 1 WHERE name = 'user_uid' RETURNING value`)
+    .first<{ value: number }>();
+  if (uidRow?.value) {
+    uid = uidRow.value;
+  } else {
+    const maxRow = await c.env.DB.prepare(`SELECT COALESCE(MAX(uid), 0) + 1 AS next FROM users`).first<{ next: number }>();
+    uid = maxRow?.next ?? 1;
+    await c.env.DB.prepare(`INSERT INTO counters (name, value) VALUES ('user_uid', ?) ON CONFLICT(name) DO UPDATE SET value = ?`)
+      .bind(uid, uid)
+      .run();
+  }
+
   try {
     await c.env.DB.prepare(
-      `INSERT INTO users (id, username, username_raw, email, password_hash, nickname, role, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, 'user', 'active', ?, ?)`,
+      `INSERT INTO users (id, uid, username, username_raw, email, password_hash, nickname, role, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'user', 'active', ?, ?)`,
     )
-      .bind(userId, usernameLower, body.username, email, passwordHash, nickname, nowIso(), nowIso())
+      .bind(userId, uid, usernameLower, body.username, email, passwordHash, nickname, nowIso(), nowIso())
       .run();
   } catch {
     // 并发注册触发唯一约束
     throw errors.conflict(CONFLICT_MESSAGE, 'USER_EXISTS');
   }
+
+  // 欢迎邮件（失败不影响注册）
+  await sendEmail(
+    c.env,
+    email,
+    '欢迎加入星辰旅人论坛',
+    `<p>你好，<strong>${escapeHtml(nickname)}</strong>！</p>
+     <p>你的账号已创建成功：</p>
+     <ul>
+       <li>用户名：${escapeHtml(body.username)}</li>
+       <li>UID：${uid}</li>
+     </ul>
+     <p><a href="${c.env.SITE_URL}/new">去发布第一篇帖子 →</a></p>`,
+  );
 
   const tokens = await issueTokens(c.env, { id: userId, role: 'user' }, deviceInfoFrom(c));
   await writeAuditLog(c, { action: 'user.register', targetType: 'user', targetId: userId, actorId: userId });
@@ -116,6 +146,7 @@ app.post('/register', async (c) => {
     {
       user: publicUser({
         id: userId,
+        uid,
         username: usernameLower,
         username_raw: body.username,
         nickname,
@@ -257,4 +288,70 @@ app.get('/me', requireAuth, async (c) => {
   return ok(c, { user: { ...publicUser(profile), email: profile.email } });
 });
 
+const forgotSchema = z.object({ email: emailSchema });
+const resetSchema = z.object({
+  token: z.string().min(20).max(200),
+  password: passwordSchema,
+});
+
+/** 忘记密码：发送重置邮件；始终返回成功以防邮箱枚举 */
+app.post('/forgot-password', async (c) => {
+  const fingerprint = await clientFingerprint(c);
+  const rl = await consumeRateLimit(c.env, { bucket: 'forgot', limit: 5, window: 3600 }, fingerprint);
+  if (!rl.ok) return ok(c, { success: true }); // 限流时也返回统一响应
+
+  const body = await parseJson(c, forgotSchema);
+  const user = await c.env.DB.prepare(`SELECT id, email, nickname, status FROM users WHERE email = ? LIMIT 1`)
+    .bind(body.email.toLowerCase())
+    .first<{ id: string; email: string; nickname: string; status: string }>();
+
+  if (user && user.status === 'active') {
+    const token = await createPasswordResetToken(c.env, user.id);
+    const resetUrl = `${c.env.SITE_URL}/reset-password?token=${token}`;
+    await sendEmail(
+      c.env,
+      user.email,
+      '重置你的密码',
+      `<p>你好，<strong>${escapeHtml(user.nickname)}</strong>：</p>
+       <p>我们收到了重置你账号密码的请求。点击下面的链接设置新密码（30 分钟内有效）：</p>
+       <p><a href="${resetUrl}">${resetUrl}</a></p>
+       <p>如果这不是你的操作，请忽略此邮件，你的密码不会改变。</p>`,
+    );
+    await writeAuditLog(c, { action: 'user.forgot_password', targetType: 'user', targetId: user.id, actorId: user.id });
+  }
+  return ok(c, { success: true });
+});
+
+/** 重置密码：消费一次性令牌，更新密码并撤销全部登录状态 */
+app.post('/reset-password', async (c) => {
+  const fingerprint = await clientFingerprint(c);
+  const rl = await consumeRateLimit(c.env, { bucket: 'resetpw', limit: 10, window: 3600 }, fingerprint);
+  if (!rl.ok) throw errors.tooMany('操作过于频繁，请稍后再试');
+
+  const body = await parseJson(c, resetSchema);
+  const strength = isStrongEnough(body.password);
+  if (!strength.ok) throw errors.badRequest(strength.reason ?? '密码强度不足', 'WEAK_PASSWORD');
+
+  const userId = await consumePasswordResetToken(c.env, body.token);
+  if (!userId) throw errors.badRequest('重置链接无效或已过期，请重新申请', 'RESET_TOKEN_INVALID');
+
+  const user = await c.env.DB.prepare(`SELECT id, role, status FROM users WHERE id = ?`)
+    .bind(userId)
+    .first<{ id: string; role: AuthUser['role']; status: string }>();
+  if (!user || user.status !== 'active') throw errors.badRequest('重置链接无效或已过期，请重新申请', 'RESET_TOKEN_INVALID');
+
+  const iterations = Number.parseInt(c.env.PASSWORD_ITERATIONS ?? '100000', 10) || 100000;
+  const passwordHash = await hashPassword(body.password, iterations);
+  await c.env.DB.prepare(`UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?`)
+    .bind(passwordHash, nowIso(), userId)
+    .run();
+  await revokeAllUserTokens(c.env, userId, 'password_reset');
+  await writeAuditLog(c, { action: 'user.reset_password', targetType: 'user', targetId: userId, actorId: userId });
+  return ok(c, { success: true });
+});
+
 export default app;
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}

@@ -6,6 +6,9 @@ import { requireAuth } from '../middleware/auth';
 import { errors, ok } from '../lib/http';
 import { parseJson, paginationSchema, paginationMeta } from '../lib/validate';
 import { nowIso } from '../lib/ids';
+import { hashPassword, isStrongEnough, verifyPassword } from '../lib/password';
+import { revokeAllUserTokens } from '../lib/tokens';
+import { writeAuditLog } from '../lib/audit';
 
 const app = new Hono<AppEnv>();
 
@@ -14,7 +17,7 @@ app.use('*', requireAuth);
 app.get('/', async (c) => {
   const user = c.get('user')!;
   const profile = await c.env.DB.prepare(
-    `SELECT id, username_raw AS username, nickname, email, avatar_url, bio, role, status,
+    `SELECT id, uid, username_raw AS username, nickname, email, avatar_url, bio, role, status,
             post_count, reply_count, last_login_at, created_at
      FROM users WHERE id = ?`,
   )
@@ -24,6 +27,7 @@ app.get('/', async (c) => {
   return ok(c, {
     user: {
       id: profile.id,
+      uid: profile.uid ?? null,
       username: profile.username,
       nickname: profile.nickname,
       email: profile.email,
@@ -98,6 +102,38 @@ app.get('/favorites', async (c) => {
     .all();
 
   return ok(c, { posts: results ?? [], pagination: paginationMeta(page, pageSize, countRow?.total ?? 0) });
+});
+
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1).max(128),
+  newPassword: z.string().min(8, '密码至少 8 位').max(128),
+});
+
+/** 修改密码：验证当前密码 → 更新 → 撤销所有 Refresh Token（强制全部设备重新登录） */
+app.patch('/password', async (c) => {
+  const user = c.get('user')!;
+  const body = await parseJson(c, changePasswordSchema);
+
+  const strength = isStrongEnough(body.newPassword);
+  if (!strength.ok) throw errors.badRequest(strength.reason ?? '密码强度不足', 'WEAK_PASSWORD');
+  if (body.currentPassword === body.newPassword) throw errors.badRequest('新密码不能与当前密码相同');
+
+  const row = await c.env.DB.prepare(`SELECT password_hash FROM users WHERE id = ?`)
+    .bind(user.id)
+    .first<{ password_hash: string }>();
+  if (!row) throw errors.notFound();
+
+  const okCurrent = await verifyPassword(body.currentPassword, row.password_hash);
+  if (!okCurrent) throw errors.badRequest('当前密码不正确', 'WRONG_PASSWORD');
+
+  const iterations = Number.parseInt(c.env.PASSWORD_ITERATIONS ?? '100000', 10) || 100000;
+  const passwordHash = await hashPassword(body.newPassword, iterations);
+  await c.env.DB.prepare(`UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?`)
+    .bind(passwordHash, nowIso(), user.id)
+    .run();
+  await revokeAllUserTokens(c.env, user.id, 'password_change');
+  await writeAuditLog(c, { action: 'user.change_password', targetType: 'user', targetId: user.id, actorId: user.id });
+  return ok(c, { success: true });
 });
 
 export const meRoutes = app;

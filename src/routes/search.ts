@@ -97,20 +97,18 @@ app.get('/', async (c) => {
   // ---------- 用户搜索 ----------
   if (type === 'user') {
     const like = `%${escapeLike(q)}%`;
-    const countRow = await c.env.DB.prepare(
-      `SELECT COUNT(*) AS total FROM users
-       WHERE status = 'active' AND (username LIKE ? ESCAPE '\\' OR nickname LIKE ? ESCAPE '\\')`,
-    )
-      .bind(like, like)
+    const uidMatch = /^\d{1,9}$/.test(q.trim()) ? Number.parseInt(q.trim(), 10) : -1;
+    const userWhere = `status = 'active' AND (username LIKE ? ESCAPE '\\' OR nickname LIKE ? ESCAPE '\\' OR uid = ?)`;
+    const countRow = await c.env.DB.prepare(`SELECT COUNT(*) AS total FROM users WHERE ${userWhere}`)
+      .bind(like, like, uidMatch)
       .first<{ total: number }>();
     const { results } = await c.env.DB.prepare(
-      `SELECT id, username_raw AS username, nickname, avatar_url AS avatarUrl, bio, role,
+      `SELECT id, uid, username_raw AS username, nickname, avatar_url AS avatarUrl, bio, role,
               post_count AS postCount, reply_count AS replyCount, created_at AS createdAt
-       FROM users
-       WHERE status = 'active' AND (username LIKE ? ESCAPE '\\' OR nickname LIKE ? ESCAPE '\\')
+       FROM users WHERE ${userWhere}
        ORDER BY post_count DESC LIMIT ? OFFSET ?`,
     )
-      .bind(like, like, pageSize, offset)
+      .bind(like, like, uidMatch, pageSize, offset)
       .all();
     return ok(c, { users: results ?? [], pagination: paginationMeta(page, pageSize, countRow?.total ?? 0) });
   }

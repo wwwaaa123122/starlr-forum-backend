@@ -5,6 +5,7 @@ import { newId, nowIso } from './ids';
 
 export interface AuditEntry {
   action: string;
+  /** 操作发起者（audit_logs.actor_id NOT NULL；系统动作记为目标用户本人） */
   actorId: string;
   targetType?: string;
   targetId?: string;
