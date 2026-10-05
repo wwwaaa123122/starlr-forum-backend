@@ -47,6 +47,18 @@ const listQuerySchema = z.object({
 // ---------------------------------------------------------------
 // 列表
 // ---------------------------------------------------------------
+
+// 热门标签（发布器推荐用，公开）
+app.get('/tags', async (c) => {
+  const { results } = await c.env.DB.prepare(
+    `SELECT t.name, COUNT(pt.post_id) AS count
+     FROM tags t JOIN post_tags pt ON pt.tag_id = t.id
+     JOIN posts p ON p.id = pt.post_id AND p.is_deleted = 0
+     GROUP BY t.id ORDER BY count DESC, t.name ASC LIMIT 12`,
+  ).all();
+  return ok(c, { tags: results ?? [] });
+});
+
 app.get('/', async (c) => {
   const q = parseQuery(c, listQuerySchema);
   const offset = (q.page - 1) * q.pageSize;

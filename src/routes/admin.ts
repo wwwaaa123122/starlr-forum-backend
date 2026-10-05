@@ -187,13 +187,22 @@ app.get('/users', async (c) => {
   }
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
-  const countRow = await c.env.DB.prepare(`SELECT COUNT(*) AS total, status, email_verified FROM users ${whereSql}`)
+  const countRow = await c.env.DB.prepare(`SELECT COUNT(*) AS total FROM users ${whereSql}`)
     .bind(...params)
     .first<{ total: number }>();
   const { results } = await c.env.DB.prepare(
-    `SELECT id, uid, username_raw AS username, email, nickname, role, status, post_count AS postCount,
-            reply_count AS replyCount, created_at AS createdAt, last_login_at AS lastLoginAt
-     FROM users ${whereSql} ORDER BY uid ASC LIMIT ? OFFSET ?`,
+    `SELECT u.id, u.uid, u.username_raw AS username, u.email, u.nickname, u.role, u.status,
+            u.email_verified AS emailVerified, u.post_count AS postCount, u.reply_count AS replyCount,
+            u.created_at AS createdAt, u.last_login_at AS lastLoginAt,
+            (SELECT b.expires_at FROM bans b
+              WHERE b.user_id = u.id AND b.type = 'mute' AND b.lifted_at IS NULL
+                AND (b.expires_at IS NULL OR b.expires_at > datetime('now','utc'))
+              ORDER BY (b.expires_at IS NULL) DESC, b.created_at DESC, b.rowid DESC LIMIT 1) AS mutedUntil,
+            (SELECT b.expires_at IS NULL FROM bans b
+              WHERE b.user_id = u.id AND b.type = 'mute' AND b.lifted_at IS NULL
+                AND (b.expires_at IS NULL OR b.expires_at > datetime('now','utc'))
+              ORDER BY (b.expires_at IS NULL) DESC, b.created_at DESC, b.rowid DESC LIMIT 1) AS mutedPermanent
+     FROM users u ${whereSql} ORDER BY u.uid ASC LIMIT ? OFFSET ?`,
   )
     .bind(...params, pageSize, offset)
     .all();
