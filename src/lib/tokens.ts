@@ -19,8 +19,9 @@ export interface TokenPair {
 }
 
 function accessTtl(env: Env): number {
-  const n = Number.parseInt(env.ACCESS_TOKEN_TTL ?? '86400', 10);
-  return Number.isFinite(n) && n > 0 ? n : 86400;
+  // 默认 30 分钟：会话吊销后旧 Access Token 至多存活 30 分钟（应用有静默续期，无感知）
+  const n = Number.parseInt(env.ACCESS_TOKEN_TTL ?? '1800', 10);
+  return Number.isFinite(n) && n > 0 ? n : 1800;
 }
 
 function refreshTtl(env: Env): number {
@@ -38,6 +39,12 @@ export async function issueTokens(
   const now = Math.floor(Date.now() / 1000);
   const ttl = accessTtl(env);
   const jti = newId(24);
+  const refreshToken = randomToken(32);
+  const refreshTokenId = newId(16);
+  const tokenHash = await sha256Hex(refreshToken);
+  // Token 链根：首发的 Token 以自身为根；子 Token 继承父级的根
+  const rootId = parent ? (parent.rootId ?? parent.id) : null;
+
   const { token } = await signAccessToken(env, {
     iss: env.JWT_ISSUER,
     sub: user.id,
@@ -47,19 +54,15 @@ export async function issueTokens(
     jti,
     typ: 'access',
     role: user.role,
+    // sid = 本次会话（刷新令牌链）当前行 ID，用于「会话管理」标记当前设备
+    sid: refreshTokenId,
   });
-
-  const refreshToken = randomToken(32);
-  const refreshTokenId = newId(16);
-  const tokenHash = await sha256Hex(refreshToken);
-  // Token 链根：首发的 Token 以自身为根；子 Token 继承父级的根
-  const rootId = parent ? (parent.rootId ?? parent.id) : null;
 
   await env.DB.prepare(
     `INSERT INTO refresh_tokens (id, user_id, token_hash, parent_id, root_id, device_info, created_at, expires_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   )
-    .bind(refreshTokenId, user.id, tokenHash, parent?.id ?? null, rootId, deviceInfo.slice(0, 200), nowIso(), isoFromNow(refreshTtl(env)))
+    .bind(refreshTokenId, user.id, tokenHash, parent?.id ?? null, rootId, deviceInfo.slice(0, 500), nowIso(), isoFromNow(refreshTtl(env)))
     .run();
 
   return { accessToken: token, refreshToken, accessExpiresIn: ttl, refreshTokenId };

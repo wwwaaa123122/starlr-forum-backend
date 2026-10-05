@@ -13,7 +13,14 @@ let requestCounter = 0;
 /** 每次请求使用不同 UA，避免测试之间触发同一限流指纹 */
 export async function req<T = any>(
   path: string,
-  options: { method?: string; body?: unknown; token?: string; headers?: Record<string, string> } = {},
+  options: {
+    method?: string;
+    body?: unknown;
+    token?: string;
+    headers?: Record<string, string>;
+    /** 模拟 Cloudflare 请求地理数据（request.cf） */
+    cf?: Record<string, unknown>;
+  } = {},
 ): Promise<ApiResponse<T>> {
   const headers: Record<string, string> = {
     'user-agent': `vitest-agent-${requestCounter++}`,
@@ -34,6 +41,7 @@ export async function req<T = any>(
         : options.body !== undefined
           ? JSON.stringify(options.body)
           : undefined,
+      ...(options.cf ? { cf: options.cf } : {}),
     },
     env as unknown as Env,
   );

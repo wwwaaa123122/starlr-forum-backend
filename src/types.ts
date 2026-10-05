@@ -51,6 +51,8 @@ export type AppBindings = { Bindings: Env };
 export interface AppVariables {
   user: AuthUser | null;
   tokenJti: string | null;
+  /** 当前会话（刷新令牌链当前行）ID，来自 access token 的 sid 声明 */
+  tokenSid: string | null;
   requestId: string;
   /** Token 有效但账号被封禁（requireAuth 用于精确错误码） */
   userBanned?: boolean;

@@ -12,6 +12,7 @@ import { newId, nowIso, sha256Hex } from '../lib/ids';
 import { issueTokens, revokeTokenChain, rotateRefreshToken, revokeAllUserTokens } from '../lib/tokens';
 import { RATE_LIMITS, clientFingerprint, consumeRateLimit } from '../lib/rate-limit';
 import { verifyTurnstile } from '../lib/turnstile';
+import { sessionInfoFrom } from '../lib/session-info';
 import { requireAuth } from '../middleware/auth';
 import { writeAuditLog } from '../lib/audit';
 import { sendVerificationEmail, createEmailVerificationToken, consumeEmailVerificationToken, consumePasswordResetToken, createPasswordResetToken, sendEmail } from '../lib/mail';
@@ -45,9 +46,9 @@ const loginSchema = z.object({
 const refreshSchema = z.object({ refreshToken: z.string().min(10).max(512) });
 const logoutSchema = z.object({ refreshToken: z.string().min(10).max(512).optional(), allDevices: z.boolean().optional() });
 
-function deviceInfoFrom(c: { req: { header: (n: string) => string | undefined } }): string {
-  const ua = c.req.header('user-agent') ?? '';
-  return ua.slice(0, 200);
+/** 登录/刷新时的会话信息：UA + Cloudflare IP 库（IP/国家/城市/ASN/边缘节点） */
+function deviceInfoFrom(c: Parameters<typeof sessionInfoFrom>[0]): string {
+  return sessionInfoFrom(c);
 }
 
 function publicUser(user: Record<string, unknown>) {

@@ -1,5 +1,6 @@
 /** /api/me — 当前用户资料与个人数据 */
 import { Hono } from 'hono';
+import { parseSessionInfo, formatLocation } from '../lib/session-info';
 import { z } from 'zod';
 import type { AppEnv } from '../types';
 import { requireAuth } from '../middleware/auth';
@@ -7,7 +8,7 @@ import { errors, ok } from '../lib/http';
 import { parseJson, paginationSchema, paginationMeta } from '../lib/validate';
 import { nowIso } from '../lib/ids';
 import { hashPassword, isStrongEnough, verifyPassword } from '../lib/password';
-import { revokeAllUserTokens } from '../lib/tokens';
+import { revokeAllUserTokens, revokeTokenChain } from '../lib/tokens';
 import { writeAuditLog } from '../lib/audit';
 
 const app = new Hono<AppEnv>();
@@ -172,4 +173,128 @@ app.get('/likes', async (c) => {
     .all();
 
   return ok(c, { posts: results ?? [], pagination: paginationMeta(page, pageSize, countRow?.total ?? 0) });
+});
+
+// ---------------------------------------------------------------------------
+// 会话管理：列出 / 吊销 / 吊销其他（会话 = 一条刷新令牌链，含 Cloudflare IP 库地理信息）
+// ---------------------------------------------------------------------------
+interface SessionRow {
+  id: string;
+  root_id: string | null;
+  device_info: string;
+  created_at: string;
+  last_used_at: string | null;
+  expires_at: string;
+}
+
+/** 展示一条会话：设备/位置/IP + 当前标记 */
+function presentSession(row: SessionRow, currentChainRoot: string | null) {
+  const info = parseSessionInfo(row.device_info);
+  return {
+    id: row.id,
+    chainRoot: row.root_id ?? row.id,
+    device: info.ua,
+    ip: info.ip,
+    location: formatLocation(info),
+    colo: info.colo,
+    asn: info.asn,
+    /** 会话开始 = 该链最早的登录时间 */
+    loginAt: row.created_at,
+    lastUsedAt: row.last_used_at ?? row.created_at,
+    expiresAt: row.expires_at,
+    current: (row.root_id ?? row.id) === currentChainRoot,
+  };
+}
+
+/** 我的活跃会话列表（按最近活跃排序） */
+app.get('/sessions', async (c) => {
+  const user = c.get('user')!;
+  const sid = c.get('tokenSid');
+
+  let currentChainRoot: string | null = null;
+  if (sid) {
+    const row = await c.env.DB.prepare(`SELECT root_id, id FROM refresh_tokens WHERE id = ? AND user_id = ?`)
+      .bind(sid, user.id)
+      .first<{ root_id: string | null; id: string }>();
+    if (row) currentChainRoot = row.root_id ?? row.id;
+  }
+
+  const { results } = await c.env.DB.prepare(
+    `SELECT id, root_id, device_info, created_at, last_used_at, expires_at
+     FROM refresh_tokens
+     WHERE user_id = ? AND revoked_at IS NULL AND rotated_at IS NULL AND expires_at > ?
+     ORDER BY COALESCE(last_used_at, created_at) DESC`,
+  )
+    .bind(user.id, nowIso())
+    .all();
+
+  const rows = (results ?? []) as unknown as SessionRow[];
+  // 每条链只取最新一行（防御性：正常情况下活跃行即未轮换行）
+  const byChain = new Map<string, SessionRow>();
+  for (const row of rows) {
+    const key = row.root_id ?? row.id;
+    const prev = byChain.get(key);
+    if (!prev || row.created_at > prev.created_at) byChain.set(key, row);
+  }
+
+  const sessions = [...byChain.values()].map((row) => presentSession(row, currentChainRoot));
+  return ok(c, { sessions, total: sessions.length });
+});
+
+/** 吊销指定会话（按链整链撤销） */
+app.delete('/sessions/:id', async (c) => {
+  const user = c.get('user')!;
+  const sid = c.get('tokenSid');
+  const id = c.req.param('id');
+
+  const row = await c.env.DB.prepare(`SELECT id, root_id FROM refresh_tokens WHERE id = ? AND user_id = ?`)
+    .bind(id, user.id)
+    .first<{ id: string; root_id: string | null }>();
+  if (!row) throw errors.notFound('会话不存在');
+
+  const rootId = row.root_id ?? row.id;
+  if (sid && row.id === sid) throw errors.badRequest('不能吊销当前正在使用的会话，请使用「退出登录」', 'CURRENT_SESSION');
+
+  await revokeTokenChain(c.env, rootId, 'user_session_revoked');
+  await writeAuditLog(c, { action: 'user.session_revoked', actorId: user.id, targetType: 'user', targetId: user.id });
+  return ok(c, { revoked: true });
+});
+
+/** 吊销除当前会话外的所有会话 */
+app.post('/sessions/revoke-others', async (c) => {
+  const user = c.get('user')!;
+  const sid = c.get('tokenSid');
+
+  const rows = await c.env.DB.prepare(
+    `SELECT id, root_id FROM refresh_tokens WHERE user_id = ? AND revoked_at IS NULL AND rotated_at IS NULL AND expires_at > ?`,
+  )
+    .bind(user.id, nowIso())
+    .all<{ id: string; root_id: string | null }>();
+  if (!rows.results || rows.results.length === 0) return ok(c, { revokedCount: 0 });
+
+  // 当前会话所在链
+  let currentRoot: string | null = null;
+  if (sid) {
+    const cur = rows.results.find((r) => r.id === sid);
+    if (cur) currentRoot = cur.root_id ?? cur.id;
+  }
+
+  const chains = new Set<string>();
+  let revokedCount = 0;
+  const stmt = c.env.DB.prepare(
+    `UPDATE refresh_tokens SET revoked_at = ?, revoked_reason = ? WHERE (root_id = ? OR id = ?) AND revoked_at IS NULL`,
+  );
+  const batch = [];
+  for (const row of rows.results) {
+    const rootId = row.root_id ?? row.id;
+    if (currentRoot && rootId === currentRoot) continue;
+    if (chains.has(rootId)) continue;
+    chains.add(rootId);
+    batch.push(stmt.bind(nowIso(), 'user_session_revoke_others', rootId, rootId));
+    revokedCount += 1;
+  }
+  if (batch.length > 0) await c.env.DB.batch(batch);
+
+  await writeAuditLog(c, { action: 'user.session_revoke_others', actorId: user.id, targetType: 'user', targetId: user.id });
+  return ok(c, { revokedCount });
 });

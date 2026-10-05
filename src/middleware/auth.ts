@@ -17,6 +17,7 @@ export function getBearerToken(header: string | undefined): string | null {
 export const optionalAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
   c.set('user', null);
   c.set('tokenJti', null);
+  c.set('tokenSid', null);
   const token = getBearerToken(c.req.header('Authorization'));
   if (token) {
     const result = await verifyAccessToken(c.env, token);
@@ -32,6 +33,7 @@ export const optionalAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
         if (user && user.status === 'active') {
           c.set('user', user);
           c.set('tokenJti', typeof result.payload.jti === 'string' ? result.payload.jti : null);
+          c.set('tokenSid', typeof result.payload.sid === 'string' ? result.payload.sid : null);
         } else if (user && user.status === 'banned') {
           c.set('userBanned', true);
         }

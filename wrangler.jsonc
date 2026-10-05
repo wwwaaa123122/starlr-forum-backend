@@ -40,7 +40,7 @@
     "SITE_URL": "https://i.182030.xyz",
     "JWT_ISSUER": "https://i.182030.xyz",
     "JWT_AUDIENCE": "api",
-    "ACCESS_TOKEN_TTL": "86400",
+    "ACCESS_TOKEN_TTL": "1800",
     "REFRESH_TOKEN_TTL": "2592000",
     "PASSWORD_ITERATIONS": "100000",
     "TURNSTILE_SITE_KEY": "0x4AAAAAAFOSQFHmv_Mdvjrg",

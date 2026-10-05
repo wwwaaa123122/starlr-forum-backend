@@ -69,7 +69,7 @@ describe('JWT 校验（算法混淆 / none / iss / aud / exp / iat）', () => {
     const serialized = JSON.stringify(payload).toLowerCase();
     expect(serialized).not.toContain('password');
     expect(serialized).not.toContain('email');
-    expect(Object.keys(payload).sort()).toEqual(['aud', 'exp', 'iat', 'iss', 'jti', 'role', 'sub', 'typ']);
+    expect(Object.keys(payload).sort()).toEqual(['aud', 'exp', 'iat', 'iss', 'jti', 'role', 'sid', 'sub', 'typ']);
   });
 });
 
