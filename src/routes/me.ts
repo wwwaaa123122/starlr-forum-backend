@@ -89,9 +89,10 @@ app.get('/favorites', async (c) => {
     .first<{ total: number }>();
 
   const { results } = await c.env.DB.prepare(
-    `SELECT p.id, p.title, p.reply_count AS replyCount, p.like_count AS likeCount,
-            p.created_at AS createdAt, f.created_at AS favoritedAt,
-            u.username_raw AS authorName, u.id AS authorId, u.avatar_url AS authorAvatar,
+    `SELECT p.id, p.title, substr(p.content, 1, 200) AS excerpt, p.view_count AS viewCount,
+            p.reply_count AS replyCount, p.like_count AS likeCount, p.is_pinned AS isPinned, p.is_featured AS isFeatured,
+            p.created_at AS createdAt, p.last_reply_at AS lastReplyAt, f.created_at AS favoritedAt,
+            u.username_raw AS authorName, u.id AS authorId, u.uid AS authorUid, u.avatar_url AS authorAvatar,
             c.name AS categoryName, c.slug AS categorySlug
      FROM favorites f
      JOIN posts p ON p.id = f.post_id AND p.is_deleted = 0
@@ -140,3 +141,35 @@ app.patch('/password', async (c) => {
 
 export const meRoutes = app;
 export default app;
+
+/** 我点赞过的帖子（按点赞时间倒序） */
+app.get('/likes', async (c) => {
+  const user = c.get('user')!;
+  const { page, pageSize } = paginationSchema.parse(Object.fromEntries(new URL(c.req.url).searchParams));
+  const offset = (page - 1) * pageSize;
+
+  const countRow = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS total FROM likes l JOIN posts p ON p.id = l.target_id AND p.is_deleted = 0
+     WHERE l.user_id = ? AND l.target_type = 'post'`,
+  )
+    .bind(user.id)
+    .first<{ total: number }>();
+
+  const { results } = await c.env.DB.prepare(
+    `SELECT p.id, p.title, substr(p.content, 1, 200) AS excerpt, p.view_count AS viewCount,
+            p.reply_count AS replyCount, p.like_count AS likeCount, p.is_pinned AS isPinned, p.is_featured AS isFeatured,
+            p.created_at AS createdAt, p.last_reply_at AS lastReplyAt, l.created_at AS likedAt,
+            u.username_raw AS authorName, u.id AS authorId, u.uid AS authorUid, u.avatar_url AS authorAvatar,
+            c.name AS categoryName, c.slug AS categorySlug
+     FROM likes l
+     JOIN posts p ON p.id = l.target_id AND p.is_deleted = 0
+     JOIN users u ON u.id = p.author_id
+     JOIN categories c ON c.id = p.category_id
+     WHERE l.user_id = ? AND l.target_type = 'post'
+     ORDER BY l.created_at DESC LIMIT ? OFFSET ?`,
+  )
+    .bind(user.id, pageSize, offset)
+    .all();
+
+  return ok(c, { posts: results ?? [], pagination: paginationMeta(page, pageSize, countRow?.total ?? 0) });
+});
