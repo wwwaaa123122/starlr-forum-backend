@@ -1,0 +1,51 @@
+// 星辰旅人论坛 — Cloudflare Workers 配置
+// 静态资源来自 frontend/dist（前后端分离构建，单 Worker 承载 API + 静态站点）
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "xingchen-forum",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "../frontend/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/oauth/*", "/.well-known/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "xingchen-forum-db",
+      "database_id": "644b5c0c-ab78-4984-93dc-2f2978096add"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "CACHE",
+      "id": "10623b6e6ae9438299ff5b86a476333c"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "UPLOADS",
+      "bucket_name": "xingchen-forum-uploads"
+    }
+  ],
+  "observability": {
+    "enabled": true
+  },
+  "vars": {
+    // 站点标识，用于 JWT iss / OIDC issuer。生产部署后改成实际域名。
+    "SITE_URL": "https://xingchen-forum.wwwaaa123122.workers.dev",
+    "JWT_ISSUER": "https://xingchen-forum.wwwaaa123122.workers.dev",
+    "JWT_AUDIENCE": "api",
+    "ACCESS_TOKEN_TTL": "86400",
+    "REFRESH_TOKEN_TTL": "2592000",
+    "PASSWORD_ITERATIONS": "100000",
+    "TURNSTILE_SITE_KEY": "0x4AAAAAAFOSQFHmv_Mdvjrg"
+  },
+  // 生产密钥通过 wrangler secret put 设置：
+  //   JWT_SIGNING_KEYS  : JSON [{ "kid": "...", "jwk": {...}, "active": true }]（RS256 私钥 JWK，禁止入库/硬编码）
+  //   TURNSTILE_SECRET_KEY : Cloudflare Turnstile 服务端密钥
+  "placement": { "mode": "smart" }
+}
