@@ -135,11 +135,32 @@ app.get('/stats', async (c) => {
     c.env.DB.prepare(`SELECT COUNT(*) AS n FROM replies WHERE is_deleted = 0`),
     c.env.DB.prepare(`SELECT COUNT(*) AS n FROM reports WHERE status = 'pending'`),
     c.env.DB.prepare(`SELECT COUNT(*) AS n FROM users WHERE status = 'banned'`),
+    c.env.DB.prepare(`SELECT COALESCE(SUM(view_count), 0) AS n FROM posts WHERE is_deleted = 0`),
   ]);
-  const [users, posts, replies, pendingReports, banned] = counts.map(
+  const [users, posts, replies, pendingReports, banned, views] = counts.map(
     (r) => (r.results?.[0] as { n?: number } | undefined)?.n ?? 0,
   );
-  return ok(c, { users, posts, replies, pendingReports, bannedUsers: banned });
+
+  // 浏览量排行（被删帖除外）
+  const top = await c.env.DB.prepare(
+    `SELECT p.id, p.title, p.view_count AS viewCount, p.reply_count AS replyCount,
+            p.like_count AS likeCount, p.created_at AS createdAt, u.username_raw AS authorName
+     FROM posts p JOIN users u ON u.id = p.author_id
+     WHERE p.is_deleted = 0
+     ORDER BY p.view_count DESC, p.created_at DESC
+     LIMIT 10`,
+  ).all();
+
+  return ok(c, {
+    users,
+    posts,
+    replies,
+    pendingReports,
+    bannedUsers: banned,
+    totalViews: views,
+    avgViews: posts > 0 ? Math.round(views / posts) : 0,
+    topPosts: top.results ?? [],
+  });
 });
 
 // ---------------------------------------------------------------
