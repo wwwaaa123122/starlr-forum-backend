@@ -30,6 +30,18 @@ const staffSchema = z.object({
   role: z.enum(['admin', 'moderator']).default('admin'),
 });
 
+/** 手动激活用户邮箱（管理员兜底：邮件未送达时使用） */
+app.post('/users/:id/verify', requireAdmin, async (c) => {
+  const admin = c.get('user')!;
+  const id = c.req.param('id');
+  const res = await c.env.DB.prepare(`UPDATE users SET email_verified = 1, updated_at = ? WHERE id = ?`)
+    .bind(nowIso(), id)
+    .run();
+  if ((res.meta?.changes ?? 0) === 0) throw errors.notFound('用户不存在');
+  await writeAuditLog(c, { action: 'admin.user.verify', actorId: admin.id, targetType: 'user', targetId: id });
+  return ok(c, { success: true });
+});
+
 /** 当前管理员/版主列表（ownerEmail = UID 1 的邮箱，管理告警收件人） */
 app.get('/admins', async (c) => {
   const { results } = await c.env.DB.prepare(
@@ -154,7 +166,7 @@ app.get('/users', async (c) => {
   }
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
-  const countRow = await c.env.DB.prepare(`SELECT COUNT(*) AS total FROM users ${whereSql}`)
+  const countRow = await c.env.DB.prepare(`SELECT COUNT(*) AS total, status, email_verified FROM users ${whereSql}`)
     .bind(...params)
     .first<{ total: number }>();
   const { results } = await c.env.DB.prepare(

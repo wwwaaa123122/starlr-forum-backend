@@ -29,8 +29,8 @@ app.patch('/:id', requireAuth, async (c) => {
     throw errors.forbidden('只能编辑自己的回复');
   }
 
-  await c.env.DB.prepare(`UPDATE replies SET content = ?, updated_at = ? WHERE id = ?`)
-    .bind(body.content, nowIso(), id)
+  await c.env.DB.prepare(`UPDATE replies SET content = ?, updated_at = ?, edited_at = ? WHERE id = ?`)
+    .bind(body.content, nowIso(), nowIso(), id)
     .run();
   return ok(c, { success: true });
 });
@@ -88,7 +88,9 @@ app.post('/:id/like', requireAuth, async (c) => {
       content: '有人赞了你的回复',
     });
   }
-  return ok(c, { liked: true });
+  const likeCount = await c.env.DB.prepare(`SELECT like_count FROM replies WHERE id = ?`).bind(id)
+    .first<{ like_count: number }>();
+  return ok(c, { liked: true, likeCount: likeCount?.like_count ?? 0 });
 });
 
 app.delete('/:id/like', requireAuth, async (c) => {
@@ -108,7 +110,9 @@ app.delete('/:id/like', requireAuth, async (c) => {
     await c.env.DB.prepare(`UPDATE replies SET like_count = MAX(0, like_count - 1) WHERE id = ?`).bind(id).run();
     await bumpPostCounter(c.env, reply.post_id, 'like_count', -1);
   }
-  return ok(c, { liked: false });
+  const likeCount = await c.env.DB.prepare(`SELECT like_count FROM replies WHERE id = ?`).bind(id)
+    .first<{ like_count: number }>();
+  return ok(c, { liked: false, likeCount: likeCount?.like_count ?? 0 });
 });
 
 export default app;

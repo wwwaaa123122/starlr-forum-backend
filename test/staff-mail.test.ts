@@ -207,11 +207,12 @@ describe('密码重置（Resend 邮件）', () => {
     __clearMailOutbox();
     const user = await createUser({ username: 'welcomecheck' });
     const mails = __getMailOutbox();
-    const welcome = mails.find((m) => m.subject === '欢迎加入 Starlr Forum');
+    const welcome = mails.find((m) => m.subject === '激活你的 Starlr Forum 账号');
     expect(welcome).toBeTruthy();
     expect(welcome!.to).toContain(user.email);
     const me = await req('/api/me', { token: user.accessToken });
-    expect(welcome!.html).toContain(`UID：${me.body.user.uid}`);
+    // 激活邮件包含一次性激活链接
+    expect(welcome!.html).toContain('/verify-email?token=');
   });
 });
 
@@ -220,9 +221,10 @@ describe('邮件使用昵称', () => {
     __clearMailOutbox();
     const user = await createUser({ username: 'nickmailuser', nickname: '夜航星' });
 
-    const welcome = __getMailOutbox().find((m) => m.subject === '欢迎加入 Starlr Forum');
+    const welcome = __getMailOutbox().find((m) => m.subject === '激活你的 Starlr Forum 账号');
     expect(welcome).toBeTruthy();
     expect(welcome!.html).toContain('夜航星');
+    expect(welcome!.html).toContain('/verify-email?token=');
 
     // 昵称可随时修改
     const patched = await req('/api/me', { method: 'PATCH', token: user.accessToken, body: { nickname: '晨光旅人' } });
@@ -239,7 +241,7 @@ describe('邮件使用昵称', () => {
   it('不填昵称时默认使用用户名', async () => {
     __clearMailOutbox();
     const user = await createUser({ username: 'nonickname' });
-    const welcome = __getMailOutbox().find((m) => m.subject === '欢迎加入 Starlr Forum');
+    const welcome = __getMailOutbox().find((m) => m.subject === '激活你的 Starlr Forum 账号');
     expect(welcome!.html).toContain('nonickname');
     const me = await req('/api/me', { token: user.accessToken });
     expect(me.body.user.nickname).toBe('nonickname');

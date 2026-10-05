@@ -24,7 +24,7 @@ export const optionalAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
       const sub = result.payload.sub;
       if (typeof sub === 'string') {
         const user = await c.env.DB.prepare(
-          `SELECT id, uid, username, username_raw, nickname, email, role, status, avatar_url
+          `SELECT id, uid, username, username_raw, nickname, email, role, status, email_verified, avatar_url
            FROM users WHERE id = ?`,
         )
           .bind(sub)
@@ -42,6 +42,15 @@ export const optionalAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
 };
 
 /** 强制登录；banned 用户返回 403（账号封禁即时生效，不等 Token 过期） */
+/** 邮箱未验证的账号禁止发帖/回复/上传（可浏览、点赞） */
+export const requireVerified: MiddlewareHandler<AppEnv> = async (c, next) => {
+  const user = c.get('user');
+  if (user && user.email_verified === 0) {
+    throw errors.forbidden('请先到邮箱完成账号激活后再进行此操作', 'EMAIL_NOT_VERIFIED');
+  }
+  await next();
+};
+
 export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
   const user = c.get('user');
   if (!user) {

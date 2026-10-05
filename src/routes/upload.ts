@@ -7,7 +7,7 @@
 import { Hono } from 'hono';
 import type { AppEnv } from '../types';
 import { errors, ok } from '../lib/http';
-import { requireAuth, assertNotMuted } from '../middleware/auth';
+import { requireAuth, requireVerified, assertNotMuted } from '../middleware/auth';
 import { RATE_LIMITS, consumeRateLimit } from '../lib/rate-limit';
 import { newId, nowIso } from '../lib/ids';
 
@@ -41,7 +41,7 @@ const ALLOWED: Record<string, { ext: string; magic: (b: Uint8Array) => boolean }
   },
 };
 
-uploadRoutes.post('/', requireAuth, async (c) => {
+uploadRoutes.post('/', requireAuth, requireVerified, async (c) => {
   await assertNotMuted(c);
   const user = c.get('user')!;
   const rl = await consumeRateLimit(c.env, RATE_LIMITS.upload, user.id);

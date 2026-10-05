@@ -42,6 +42,7 @@ export interface AuthUser {
   email: string;
   role: 'user' | 'moderator' | 'admin';
   status: 'active' | 'banned';
+  email_verified?: number;
   avatar_url: string | null;
 }
 

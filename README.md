@@ -88,6 +88,15 @@ starlr-forum-backend/
 
 ---
 
+## 邮箱验证与账号状态
+
+- 注册后账号为**未验证**（`email_verified = 0`）：可登录浏览，但发帖 / 回复 / 上传图片返回 `403 EMAIL_NOT_VERIFIED`
+- 注册即发送**激活邮件**（Resend，24 小时一次性令牌，KV `emailverify:{sha256}`）；`POST /api/auth/verify-email` 激活
+- 未验证用户可在站内**重新发送验证邮件**（`POST /api/auth/resend-verification`，3 次/小时）
+- 管理员兜底：`POST /api/admin/users/:id/verify` 手动激活（邮件未送达时）
+- 账号状态优先级：`banned`（封禁）> `unverified`（未验证邮箱）> `active`（正常），通过 `me` 与注册响应的 `accountStatus` 下发
+- 存量用户通过迁移默认为已验证，不受影响
+
 ## 身份认证系统（核心设计）
 
 ### Access Token（JWT / RS256，24 小时）

@@ -128,6 +128,42 @@ export async function sendAdminAlert(env: Env, subject: string, bodyHtml: string
 }
 
 /** 生成密码重置令牌并返回（明文只出现一次：邮件里） */
+function escapeHtml(str: string): string {
+  return str.replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch] ?? ch);
+}
+
+/** 邮箱验证令牌（24 小时有效，一次性） */
+export async function createEmailVerificationToken(env: Env, userId: string): Promise<string> {
+  const token = crypto.randomUUID().replace(/-/g, '') + crypto.randomUUID().replace(/-/g, '');
+  await env.CACHE.put(`emailverify:${await sha256Hex(token)}`, userId, { expirationTtl: 86_400 });
+  return token;
+}
+
+export async function consumeEmailVerificationToken(env: Env, token: string): Promise<string | null> {
+  const key = `emailverify:${await sha256Hex(token)}`;
+  const userId = await env.CACHE.get(key);
+  if (!userId) return null;
+  await env.CACHE.delete(key);
+  return userId;
+}
+
+/** 发送激活账号邮件（注册后 / 重新发送） */
+export async function sendVerificationEmail(env: Env, to: string, nickname: string, token: string): Promise<boolean> {
+  const link = `${env.SITE_URL}/verify-email?token=${token}`;
+  return sendEmail(
+    env,
+    to,
+    '激活你的 Starlr Forum 账号',
+    `<p>你好，<strong>${escapeHtml(nickname)}</strong>！</p>
+     <p>感谢注册 Starlr Forum。请点击下面的按钮激活账号（链接 24 小时内有效）：</p>
+     <p style="margin:20px 0;">
+       <a href="${link}" style="background:#4f46e5;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;display:inline-block;">激活账号</a>
+     </p>
+     <p style="font-size:12px;color:#78716c;">如果按钮无法点击，请复制以下链接到浏览器打开：<br/>${link}</p>
+     <p style="font-size:12px;color:#78716c;">未验证邮箱的账号可以浏览，但无法发帖、回复或上传图片。</p>`,
+  );
+}
+
 export async function createPasswordResetToken(env: Env, userId: string): Promise<string> {
   const token = crypto.randomUUID().replace(/-/g, '') + crypto.randomUUID().replace(/-/g, '');
   const tokenHash = await sha256Hex(token);

@@ -8,7 +8,7 @@ import type { AppEnv } from '../types';
 import { errors, ok } from '../lib/http';
 import { parseJson, parseQuery, paginationSchema, paginationMeta } from '../lib/validate';
 import { RATE_LIMITS, clientFingerprint, consumeRateLimit } from '../lib/rate-limit';
-import { assertNotMuted, requireAuth, optionalAuth } from '../middleware/auth';
+import { assertNotMuted, requireAuth, optionalAuth, requireVerified } from '../middleware/auth';
 import { newId, nowIso } from '../lib/ids';
 import { bumpPostCounter, bumpUserCounter, ensureTags, tagsForPosts } from '../lib/queries';
 import { createNotification, notifyMentions } from '../lib/notify';
@@ -83,7 +83,7 @@ app.get('/', async (c) => {
     .first<{ total: number }>();
 
   const { results } = await c.env.DB.prepare(
-    `SELECT p.id, p.title, p.is_pinned AS isPinned, p.is_featured AS isFeatured,
+    `SELECT p.id, p.title, p.is_pinned AS isPinned, p.is_featured AS isFeatured, p.edited_at AS editedAt,
             p.view_count AS viewCount, p.reply_count AS replyCount, p.like_count AS likeCount,
             p.favorite_count AS favoriteCount, p.created_at AS createdAt, p.updated_at AS updatedAt,
             p.last_reply_at AS lastReplyAt,
@@ -108,7 +108,7 @@ app.get('/', async (c) => {
 // ---------------------------------------------------------------
 // 发帖
 // ---------------------------------------------------------------
-app.post('/', requireAuth, async (c) => {
+app.post('/', requireAuth, requireVerified, async (c) => {
   await assertNotMuted(c);
   const user = c.get('user')!;
 
@@ -161,7 +161,8 @@ app.get('/:id', optionalAuth, async (c) => {
 
   const post = await c.env.DB.prepare(
     `SELECT p.id, p.title, p.content, p.is_pinned AS isPinned, p.is_featured AS isFeatured,
-            p.is_deleted AS isDeleted, p.view_count AS viewCount, p.reply_count AS replyCount,
+            p.is_deleted AS isDeleted, p.edited_at AS editedAt,
+            p.view_count AS viewCount, p.reply_count AS replyCount,
             p.like_count AS likeCount, p.favorite_count AS favoriteCount,
             p.created_at AS createdAt, p.updated_at AS updatedAt, p.last_reply_at AS lastReplyAt,
             u.id AS authorId, u.uid AS authorUid, u.username_raw AS authorName, u.username AS authorUsername,
@@ -245,7 +246,8 @@ app.patch('/:id', requireAuth, async (c) => {
   }
   if (sets.length === 0) throw errors.badRequest('没有需要更新的字段');
   sets.push('updated_at = ?');
-  values.push(nowIso(), id);
+  sets.push('edited_at = ?');
+  values.push(nowIso(), nowIso(), id);
   await c.env.DB.prepare(`UPDATE posts SET ${sets.join(', ')} WHERE id = ?`).bind(...values).run();
 
   if (body.tags !== undefined) {
@@ -337,9 +339,9 @@ app.post('/:id/like', requireAuth, async (c) => {
       postId: id,
       content: '有人赞了你的帖子',
     });
-    return ok(c, { liked: true });
+    return ok(c, { liked: true, likeCount: await currentLikeCount(c.env, id) });
   }
-  return ok(c, { liked: true, already: true });
+  return ok(c, { liked: true, already: true, likeCount: await currentLikeCount(c.env, id) });
 });
 
 app.delete('/:id/like', requireAuth, async (c) => {
@@ -353,8 +355,14 @@ app.delete('/:id/like', requireAuth, async (c) => {
   if ((res.meta?.changes ?? 0) > 0) {
     await bumpPostCounter(c.env, id, 'like_count', -1);
   }
-  return ok(c, { liked: false });
+  return ok(c, { liked: false, likeCount: await currentLikeCount(c.env, id) });
 });
+
+/** 读取帖子当前点赞数（响应返回权威值，前端据此更新缓存） */
+async function currentLikeCount(env: AppEnv['Bindings'], postId: string): Promise<number> {
+  const row = await env.DB.prepare(`SELECT like_count FROM posts WHERE id = ?`).bind(postId).first<{ like_count: number }>();
+  return row?.like_count ?? 0;
+}
 
 // ---------------------------------------------------------------
 // 收藏
@@ -416,24 +424,31 @@ app.get('/:id/replies', async (c) => {
     .bind(id)
     .first<{ total: number }>();
 
+  const currentUserId = c.get('user')?.id ?? '';
+  const likedExpr = currentUserId
+    ? `EXISTS(SELECT 1 FROM likes l WHERE l.target_type = 'reply' AND l.target_id = r.id AND l.user_id = ?) AS liked`
+    : '0 AS liked';
+  const likedParam = currentUserId ? [currentUserId] : [];
   const { results } = await c.env.DB.prepare(
     `SELECT r.id, r.content, r.parent_id AS parentReplyId, r.reply_to_user_id AS replyToUserId,
             r.like_count AS likeCount, r.created_at AS createdAt, r.updated_at AS updatedAt,
+            r.edited_at AS editedAt,
             u.id AS authorId, u.uid AS authorUid, u.username_raw AS authorName, u.avatar_url AS authorAvatar, u.role AS authorRole,
-            ru.username_raw AS replyToUserName
+            ru.username_raw AS replyToUserName,
+            ${likedExpr}
      FROM replies r
      JOIN users u ON u.id = r.author_id
      LEFT JOIN users ru ON ru.id = r.reply_to_user_id
      WHERE r.post_id = ? AND r.is_deleted = 0
      ORDER BY r.created_at ASC LIMIT ? OFFSET ?`,
   )
-    .bind(id, pageSize, offset)
+    .bind(...likedParam, id, pageSize, offset)
     .all();
 
   return ok(c, { replies: results ?? [], pagination: paginationMeta(page, pageSize, countRow?.total ?? 0) });
 });
 
-app.post('/:id/replies', requireAuth, async (c) => {
+app.post('/:id/replies', requireAuth, requireVerified, async (c) => {
   await assertNotMuted(c);
   const user = c.get('user')!;
   const id = c.req.param('id');

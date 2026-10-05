@@ -72,6 +72,11 @@ export async function createUser(
     body: { username, email, password, ...(overrides.nickname ? { nickname: overrides.nickname } : {}) },
   });
   if (res.status !== 201) throw new Error(`注册失败: ${res.status} ${JSON.stringify(res.body)}`);
+  // 默认视为已验证邮箱（新注册默认未验证，需验证的用例单独覆盖）
+  await (env as unknown as { DB: { prepare: (q: string) => { bind: (...v: unknown[]) => { run: () => Promise<unknown> } } } })
+    .DB.prepare(`UPDATE users SET email_verified = 1 WHERE username = ?`)
+    .bind(username)
+    .run();
   return {
     id: res.body.user.id,
     uid: res.body.user.uid,

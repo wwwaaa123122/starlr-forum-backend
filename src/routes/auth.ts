@@ -14,7 +14,7 @@ import { RATE_LIMITS, clientFingerprint, consumeRateLimit } from '../lib/rate-li
 import { verifyTurnstile } from '../lib/turnstile';
 import { requireAuth } from '../middleware/auth';
 import { writeAuditLog } from '../lib/audit';
-import { sendEmail, consumePasswordResetToken, createPasswordResetToken } from '../lib/mail';
+import { sendVerificationEmail, createEmailVerificationToken, consumeEmailVerificationToken, consumePasswordResetToken, createPasswordResetToken, sendEmail } from '../lib/mail';
 
 const app = new Hono<AppEnv>();
 
@@ -62,6 +62,10 @@ function publicUser(user: Record<string, unknown>) {
     postCount: user.post_count ?? 0,
     replyCount: user.reply_count ?? 0,
     createdAt: user.created_at,
+    emailVerified: (user.email_verified ?? 1) === 1,
+    /** 账号状态：banned（封禁）> unverified（未验证邮箱）> active（正常） */
+    accountStatus:
+      user.status === 'banned' ? 'banned' : (user.email_verified ?? 1) === 1 ? 'active' : 'unverified',
   };
 }
 
@@ -114,8 +118,8 @@ app.post('/register', async (c) => {
 
   try {
     await c.env.DB.prepare(
-      `INSERT INTO users (id, uid, username, username_raw, email, password_hash, nickname, role, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'user', 'active', ?, ?)`,
+      `INSERT INTO users (id, uid, username, username_raw, email, password_hash, nickname, role, status, email_verified, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'user', 'active', 0, ?, ?)`,
     )
       .bind(userId, uid, usernameLower, body.username, email, passwordHash, nickname, nowIso(), nowIso())
       .run();
@@ -124,19 +128,9 @@ app.post('/register', async (c) => {
     throw errors.conflict(CONFLICT_MESSAGE, 'USER_EXISTS');
   }
 
-  // 欢迎邮件（失败不影响注册）
-  await sendEmail(
-    c.env,
-    email,
-    '欢迎加入 Starlr Forum',
-    `<p>你好，<strong>${escapeHtml(nickname)}</strong>！</p>
-     <p>你的账号已创建成功：</p>
-     <ul>
-       <li>用户名：${escapeHtml(body.username)}</li>
-       <li>UID：${uid}</li>
-     </ul>
-     <p><a href="${c.env.SITE_URL}/new">去发布第一篇帖子 →</a></p>`,
-  );
+  // 激活邮件（失败不影响注册；用户可在设置页重新发送）
+  const verifyToken = await createEmailVerificationToken(c.env, userId);
+  await sendVerificationEmail(c.env, email, nickname, verifyToken);
 
   const tokens = await issueTokens(c.env, { id: userId, role: 'user' }, deviceInfoFrom(c));
   await writeAuditLog(c, { action: 'user.register', targetType: 'user', targetId: userId, actorId: userId });
@@ -154,6 +148,8 @@ app.post('/register', async (c) => {
         post_count: 0,
         reply_count: 0,
         created_at: nowIso(),
+        email_verified: 0,
+        status: 'active',
       }),
       ...tokens,
       tokenType: 'Bearer',
@@ -295,6 +291,36 @@ const resetSchema = z.object({
 });
 
 /** 忘记密码：发送重置邮件；始终返回成功以防邮箱枚举 */
+/** 激活账号：一次性令牌 */
+app.post('/verify-email', async (c) => {
+  const rl = await consumeRateLimit(c.env, { bucket: 'verify-email', limit: 10, window: 3600 }, await clientFingerprint(c));
+  if (!rl.ok) throw errors.tooMany('操作过于频繁，请稍后再试');
+  const { token } = await parseJson(c, z.object({ token: z.string().trim().min(10).max(200) }));
+  const userId = await consumeEmailVerificationToken(c.env, token);
+  if (!userId) throw errors.badRequest('链接无效或已过期，请登录后重新获取验证邮件', 'INVALID_TOKEN');
+  await c.env.DB.prepare(`UPDATE users SET email_verified = 1, updated_at = ? WHERE id = ?`)
+    .bind(nowIso(), userId)
+    .run();
+  await writeAuditLog(c, { action: 'user.email_verified', targetType: 'user', targetId: userId, actorId: userId });
+  return ok(c, { verified: true });
+});
+
+/** 重新发送验证邮件（需登录） */
+app.post('/resend-verification', requireAuth, async (c) => {
+  const user = c.get('user')!;
+  const rl = await consumeRateLimit(c.env, { bucket: 'resend-verify', limit: 3, window: 3600 }, user.id);
+  if (!rl.ok) throw errors.tooMany('发送过于频繁，请 1 小时后再试');
+  const row = await c.env.DB.prepare(`SELECT email, nickname, email_verified FROM users WHERE id = ?`)
+    .bind(user.id)
+    .first<{ email: string; nickname: string; email_verified: number }>();
+  if (!row) throw errors.notFound();
+  if (row.email_verified === 1) return ok(c, { sent: false, alreadyVerified: true });
+  const token = await createEmailVerificationToken(c.env, user.id);
+  await sendVerificationEmail(c.env, row.email, row.nickname, token);
+  await writeAuditLog(c, { action: 'user.resend_verification', targetType: 'user', targetId: user.id, actorId: user.id });
+  return ok(c, { sent: true });
+});
+
 app.post('/forgot-password', async (c) => {
   const fingerprint = await clientFingerprint(c);
   const rl = await consumeRateLimit(c.env, { bucket: 'forgot', limit: 5, window: 3600 }, fingerprint);

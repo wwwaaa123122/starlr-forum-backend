@@ -17,7 +17,7 @@ app.use('*', requireAuth);
 app.get('/', async (c) => {
   const user = c.get('user')!;
   const profile = await c.env.DB.prepare(
-    `SELECT id, uid, username_raw AS username, nickname, email, avatar_url, bio, role, status,
+    `SELECT id, uid, username_raw AS username, nickname, email, avatar_url, bio, role, status, email_verified,
             post_count, reply_count, last_login_at, created_at
      FROM users WHERE id = ?`,
   )
@@ -35,6 +35,8 @@ app.get('/', async (c) => {
       bio: profile.bio,
       role: profile.role,
       status: profile.status,
+      emailVerified: (profile.email_verified ?? 1) === 1,
+      accountStatus: profile.status === 'banned' ? 'banned' : (profile.email_verified ?? 1) === 1 ? 'active' : 'unverified',
       postCount: profile.post_count,
       replyCount: profile.reply_count,
       lastLoginAt: profile.last_login_at,
