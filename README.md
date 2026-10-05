@@ -146,6 +146,12 @@ node scripts/generate-jwt-keys.mjs --print | wrangler secret put JWT_SIGNING_KEY
 - 用户注册时通过 `counters` 表原子分配 UID（从 1 开始、全局唯一；管理员固定为 UID 1）
 - 管理后台「管理员」Tab：输入 UID 即可授予/撤销管理员或版主权限（仅 admin 可操作；不能撤销自己；至少保留一位管理员），并邮件通知被授权人
 
+### 文件与头像存储
+
+- **头像**：上传后存入 KV（键 `avatar:{uid}`，≤2MB，带 contentType 元数据），经 `GET /api/avatars/:uid` 读取；URL 带 `?v=` 时间戳做缓存失效；用户头像改动即时生效
+- **帖子/回复图片**：存入 R2，经 `GET /api/files/{key}` 读取（一年不可变缓存）
+- 两者共用 `POST /api/upload`（purpose=avatar/post/reply），服务端强校验 MIME + 魔数字节
+
 ### 邮件（Resend）
 
 - 域名 `182030.xyz` 已完成 Resend 验证，发件人 `no-reply@182030.xyz`

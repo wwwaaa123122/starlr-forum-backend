@@ -19,7 +19,9 @@ export async function req<T = any>(
     'user-agent': `vitest-agent-${requestCounter++}`,
     ...options.headers,
   };
-  if (options.body !== undefined) headers['Content-Type'] = 'application/json';
+  // FormData（multipart 上传）不能序列化，也不应手动设置 Content-Type（需保留边界）
+  const isForm = options.body instanceof FormData;
+  if (options.body !== undefined && !isForm) headers['Content-Type'] = 'application/json';
   if (options.token) headers['Authorization'] = `Bearer ${options.token}`;
 
   const res = await app.request(
@@ -27,7 +29,11 @@ export async function req<T = any>(
     {
       method: options.method ?? 'GET',
       headers,
-      body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+      body: isForm
+        ? (options.body as FormData)
+        : options.body !== undefined
+          ? JSON.stringify(options.body)
+          : undefined,
     },
     env as unknown as Env,
   );

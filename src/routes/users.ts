@@ -56,8 +56,12 @@ app.get('/:username/posts', async (c) => {
     `SELECT p.id, p.title, substr(p.content, 1, 160) AS excerpt,
             p.reply_count AS replyCount, p.like_count AS likeCount, p.view_count AS viewCount,
             p.created_at AS createdAt, p.is_pinned AS isPinned, p.is_featured AS isFeatured,
-            c.name AS categoryName, c.slug AS categorySlug
-     FROM posts p JOIN categories c ON c.id = p.category_id
+            c.name AS categoryName, c.slug AS categorySlug,
+            u.username_raw AS authorName, u.nickname AS authorNickname,
+            u.avatar_url AS authorAvatar, u.uid AS authorUid, u.role AS authorRole
+     FROM posts p
+     JOIN categories c ON c.id = p.category_id
+     JOIN users u ON u.id = p.author_id
      WHERE p.author_id = ? AND p.is_deleted = 0
      ORDER BY p.created_at DESC LIMIT ? OFFSET ?`,
   )

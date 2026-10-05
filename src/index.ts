@@ -21,7 +21,7 @@ import searchRoutes from './routes/search';
 import userRoutes from './routes/users';
 import notificationRoutes from './routes/notifications';
 import reportRoutes from './routes/reports';
-import uploadRoutes from './routes/upload';
+import { uploadRoutes, fileRoutes } from './routes/upload';
 import adminRoutes from './routes/admin';
 import wellKnownRoutes from './routes/well-known';
 import oauthRoutes from './routes/oauth';
@@ -69,6 +69,7 @@ app.route('/api/users', userRoutes);
 app.route('/api/notifications', notificationRoutes);
 app.route('/api/reports', reportRoutes);
 app.route('/api/upload', uploadRoutes);
+app.route('/api', fileRoutes); // GET /api/files/*（R2 图片）、GET /api/avatars/:uid（KV 头像）
 app.route('/api/admin', adminRoutes);
 app.route('/.well-known', wellKnownRoutes);
 app.route('/oauth', oauthRoutes);

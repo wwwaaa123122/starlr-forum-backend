@@ -1,7 +1,8 @@
 /**
- * /api/upload — R2 图片上传（头像/帖子/回复）
- * 服务端强校验：登录 + 限流 + 大小 + MIME + 魔数字节（禁止伪装与可执行文件）
- * /api/files/:key{...} — 从 R2 读取并附带长缓存头
+ * /api/upload — 图片上传（登录 + 限流 + 大小 + MIME + 魔数字节强校验）
+ *   - purpose=avatar  → 头像存入 KV（avatar:{uid}，≤2MB），经 /api/avatars/:uid 读取
+ *   - purpose=post|reply → 图片存入 R2，经 /api/files/{key} 读取（长缓存）
+ * 路由挂载（见 index.ts）：uploadRoutes → /api/upload；fileRoutes → /api
  */
 import { Hono } from 'hono';
 import type { AppEnv } from '../types';
@@ -10,7 +11,10 @@ import { requireAuth, assertNotMuted } from '../middleware/auth';
 import { RATE_LIMITS, consumeRateLimit } from '../lib/rate-limit';
 import { newId, nowIso } from '../lib/ids';
 
-const app = new Hono<AppEnv>();
+const uploadRoutes = new Hono<AppEnv>();
+const fileRoutes = new Hono<AppEnv>();
+
+export { uploadRoutes, fileRoutes };
 
 const MAX_SIZE = 5 * 1024 * 1024; // 单文件最大 5MB
 const MAX_FILES_PER_USER = 300; // 每用户附件总量上限
@@ -37,7 +41,7 @@ const ALLOWED: Record<string, { ext: string; magic: (b: Uint8Array) => boolean }
   },
 };
 
-app.post('/', requireAuth, async (c) => {
+uploadRoutes.post('/', requireAuth, async (c) => {
   await assertNotMuted(c);
   const user = c.get('user')!;
   const rl = await consumeRateLimit(c.env, RATE_LIMITS.upload, user.id);
@@ -60,6 +64,8 @@ app.post('/', requireAuth, async (c) => {
 
   const form = await c.req.formData().catch(() => null);
   if (!form) throw errors.badRequest('必须使用 multipart/form-data 上传');
+  const rawPurpose = String(form.get('purpose') ?? 'post');
+  const purpose = ALLOWED_PURPOSES.has(rawPurpose) ? rawPurpose : 'post';
   const file = form.get('file');
   if (!(file instanceof File)) throw errors.badRequest('缺少文件字段 file');
   if (file.size === 0) throw errors.badRequest('文件为空');
@@ -79,6 +85,32 @@ app.post('/', requireAuth, async (c) => {
   const d = new Date();
   const key = `uploads/${user.id}/${d.getUTCFullYear()}/${String(d.getUTCMonth() + 1).padStart(2, '0')}/${newId(20)}.${ext}`;
 
+  // 头像：直接存 KV（小图、单值覆盖、按 uid 读取）；帖子/回复图片：存 R2
+  if (purpose === 'avatar') {
+    if (file.size > 2 * 1024 * 1024) throw errors.badRequest('头像最大 2MB', 'FILE_TOO_LARGE');
+    const avatarKey = `avatar:${user.uid ?? user.id}`; // 与 /api/avatars/:uid 读取键保持一致
+    const avatarUrl = `/api/avatars/${user.uid ?? user.id}?v=${Date.now()}`;
+    await c.env.CACHE.put(avatarKey, bytes, {
+      metadata: { contentType: mime, updatedAt: nowIso() },
+    });
+    await c.env.DB.prepare(`UPDATE users SET avatar_url = ?, updated_at = ? WHERE id = ?`)
+      .bind(avatarUrl, nowIso(), user.id)
+      .run();
+    await c.env.CACHE.put(quotaKey, String(used + 1), { expirationTtl: 86_400 });
+    return ok(
+      c,
+      {
+        url: avatarUrl,
+        mimeType: mime,
+        size: file.size,
+        purpose,
+        avatarUpdated: true,
+        quotaRemaining: Math.max(0, DAILY_UPLOAD_QUOTA - (used + 1)),
+      },
+      { status: 201 },
+    );
+  }
+
   await c.env.UPLOADS.put(key, bytes, {
     httpMetadata: { contentType: mime, cacheControl: 'public, max-age=31536000, immutable' },
   });
@@ -93,17 +125,6 @@ app.post('/', requireAuth, async (c) => {
 
   await c.env.CACHE.put(quotaKey, String(used + 1), { expirationTtl: 86_400 });
 
-  // 用途：avatar（同时更新头像）/ post / reply（默认 post）
-  const rawPurpose = String(form.get('purpose') ?? 'post');
-  const purpose = ALLOWED_PURPOSES.has(rawPurpose) ? rawPurpose : 'post';
-  let avatarUpdated = false;
-  if (purpose === 'avatar') {
-    await c.env.DB.prepare(`UPDATE users SET avatar_url = ?, updated_at = ? WHERE id = ?`)
-      .bind(`/api/files/${key}`, nowIso(), user.id)
-      .run();
-    avatarUpdated = true;
-  }
-
   return ok(
     c,
     {
@@ -113,15 +134,15 @@ app.post('/', requireAuth, async (c) => {
       mimeType: mime,
       size: file.size,
       purpose,
-      avatarUpdated,
+      avatarUpdated: false,
       quotaRemaining: Math.max(0, DAILY_UPLOAD_QUOTA - (used + 1)),
     },
     { status: 201 },
   );
 });
 
-/** R2 文件读取（公开；键必须位于 uploads/ 前缀下） */
-app.get('/files/*', async (c) => {
+/** R2 文件读取（公开；挂载于 /api → GET /api/files/*；键必须位于 uploads/ 前缀下） */
+fileRoutes.get('/files/*', async (c) => {
   const key = c.req.path.replace(/^\/api\/files\//, '');
   if (!key.startsWith('uploads/') || key.includes('..')) throw errors.notFound();
 
@@ -135,4 +156,21 @@ app.get('/files/*', async (c) => {
   return new Response(object.body, { headers });
 });
 
-export default app;
+/** 头像读取（KV 存储；挂载于 /api → GET /api/avatars/:uid） */
+fileRoutes.get('/avatars/:uid', async (c) => {
+  const uid = Number(c.req.param('uid'));
+  if (!Number.isInteger(uid) || uid <= 0) throw errors.notFound();
+  const { value, metadata } = await c.env.CACHE.getWithMetadata<ArrayBuffer & { contentType?: string }>(
+    `avatar:${uid}`,
+    { type: 'arrayBuffer' },
+  );
+  if (!value) throw errors.notFound('头像不存在');
+  return new Response(value, {
+    headers: {
+      'Content-Type': metadata?.contentType ?? 'application/octet-stream',
+      'Cache-Control': 'public, max-age=31536000, immutable', // URL 带 ?v= 时间戳做缓存失效
+    },
+  });
+});
+
+export default { uploadRoutes, fileRoutes };
