@@ -98,3 +98,37 @@ describe('会话管理', () => {
     void createPost;
   });
 });
+
+describe('会话识别（当前浏览器）', () => {
+  it('identify 用刷新令牌定位当前会话链；伪造令牌 404', async () => {
+    const u = await createUser({ username: 'identifyuser' });
+    const login2 = await req('/api/auth/login', { method: 'POST', body: { identifier: u.username, password: u.password } });
+
+    // 第二台设备用第一台的 access token 调 identify（access 与 refresh 属于同一用户）
+    const id1 = await req('/api/me/sessions/identify', {
+      token: u.accessToken,
+      method: 'POST',
+      body: { refreshToken: login2.body.refreshToken },
+    });
+    expect(id1.status).toBe(200);
+    expect(id1.body.chainRoot).toBeTruthy();
+
+    // 该 chainRoot 与列表中第二台设备的会话一致
+    const list = await req('/api/me/sessions', { token: u.accessToken });
+    const match = list.body.sessions.find((s: { chainRoot: string }) => s.chainRoot === id1.body.chainRoot);
+    expect(match).toBeTruthy();
+    expect(match.current).toBe(false); // 第一台的 access token 标记的是第一台
+
+    // 伪造/他人的刷新令牌不可识别
+    const fake = await req('/api/me/sessions/identify', { token: u.accessToken, method: 'POST', body: { refreshToken: 'x'.repeat(40) } });
+    expect(fake.status).toBe(404);
+
+    const stranger = await createUser({ username: 'identifystranger' });
+    const cross = await req('/api/me/sessions/identify', {
+      token: stranger.accessToken,
+      method: 'POST',
+      body: { refreshToken: login2.body.refreshToken },
+    });
+    expect(cross.status).toBe(404);
+  });
+});

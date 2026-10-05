@@ -6,7 +6,7 @@ import type { AppEnv } from '../types';
 import { requireAuth } from '../middleware/auth';
 import { errors, ok } from '../lib/http';
 import { parseJson, paginationSchema, paginationMeta } from '../lib/validate';
-import { nowIso } from '../lib/ids';
+import { nowIso, sha256Hex } from '../lib/ids';
 import { hashPassword, isStrongEnough, verifyPassword } from '../lib/password';
 import { revokeAllUserTokens, revokeTokenChain } from '../lib/tokens';
 import { writeAuditLog } from '../lib/audit';
@@ -258,6 +258,20 @@ app.delete('/sessions/:id', async (c) => {
   await revokeTokenChain(c.env, rootId, 'user_session_revoked');
   await writeAuditLog(c, { action: 'user.session_revoked', actorId: user.id, targetType: 'user', targetId: user.id });
   return ok(c, { revoked: true });
+});
+
+/** 识别当前客户端所在的会话链（兼容旧 access token 无 sid 的情况） */
+app.post('/sessions/identify', async (c) => {
+  const user = c.get('user')!;
+  const body = await parseJson(c, z.object({ refreshToken: z.string().min(10).max(200) }));
+  const hash = await sha256Hex(body.refreshToken);
+  const row = await c.env.DB.prepare(
+    `SELECT id, root_id FROM refresh_tokens WHERE token_hash = ? AND user_id = ? AND revoked_at IS NULL AND expires_at > ?`,
+  )
+    .bind(hash, user.id, nowIso())
+    .first<{ id: string; root_id: string | null }>();
+  if (!row) throw errors.notFound('会话不存在或已失效');
+  return ok(c, { id: row.id, chainRoot: row.root_id ?? row.id });
 });
 
 /** 吊销除当前会话外的所有会话 */
