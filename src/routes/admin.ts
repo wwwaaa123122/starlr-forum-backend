@@ -754,6 +754,37 @@ app.delete('/categories/:id', requireAdmin, async (c) => {
 
 const sortSchema = z.object({ ids: z.array(z.string().max(32)).min(1).max(100) });
 
+/** 恢复默认分类（幂等：仅补齐缺失的种子分类，不动已有分类的数据） */
+app.post('/categories/restore-defaults', requireAdmin, async (c) => {
+  const admin = c.get('user')!;
+  const defaults = [
+    { id: 'cat0welcome0000001', name: '站务公告', slug: 'announcements', description: '论坛公告与站务讨论', icon: '📢', sortOrder: 0, postPolicy: 'staff' },
+    { id: 'cat0tech000000001', name: '技术分享', slug: 'tech', description: '编程、架构、云计算与开发经验', icon: '💻', sortOrder: 1, postPolicy: 'everyone' },
+    { id: 'cat0cloud00000001', name: 'Cloudflare', slug: 'cloudflare', description: 'Workers、D1、KV、R2 与边缘计算', icon: '☁️', sortOrder: 2, postPolicy: 'everyone' },
+    { id: 'cat0idle000000001', name: '闲聊灌水', slug: 'idle', description: '轻松话题，随意畅聊', icon: '💬', sortOrder: 3, postPolicy: 'everyone' },
+    { id: 'cat0qa0000000001', name: '问答求助', slug: 'qa', description: '提问与互助解答', icon: '❓', sortOrder: 4, postPolicy: 'everyone' },
+  ];
+  const restored: string[] = [];
+  for (const d of defaults) {
+    const res = await c.env.DB.prepare(
+      `INSERT INTO categories (id, name, slug, description, icon, sort_order, post_policy)
+       SELECT ?, ?, ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM categories WHERE slug = ?)`,
+    )
+      .bind(d.id, d.name, d.slug, d.description, d.icon, d.sortOrder, d.postPolicy, d.slug)
+      .run();
+    if (res.meta.changes) restored.push(d.name);
+  }
+  if (restored.length) {
+    await writeAuditLog(c, {
+      action: 'admin.category.restore_defaults',
+      actorId: admin.id,
+      targetType: 'category',
+      detail: restored.join('、'),
+    });
+  }
+  return ok(c, { restored });
+});
+
 app.patch('/categories-sort', requireAdmin, async (c) => {
   const admin = c.get('user')!;
   const body = await parseJson(c, sortSchema);
