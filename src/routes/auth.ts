@@ -309,8 +309,19 @@ app.post('/verify-email', async (c) => {
 /** 重新发送验证邮件（需登录） */
 app.post('/resend-verification', requireAuth, async (c) => {
   const user = c.get('user')!;
-  const rl = await consumeRateLimit(c.env, { bucket: 'resend-verify', limit: 3, window: 3600 }, user.id);
-  if (!rl.ok) throw errors.tooMany('发送过于频繁，请 1 小时后再试');
+  // 双重限流：① 真正的 60 秒冷却（TTL 键，从本次发送时刻起算）
+  //           ② 每小时 3 次总量上限（固定窗口计数）
+  const nowSec = Math.floor(Date.now() / 1000);
+  const cooldownKey = `rv-cd:${user.id}`;
+  const lastSentAt = await c.env.CACHE.get(cooldownKey);
+  if (lastSentAt) {
+    const elapsed = nowSec - (Number.parseInt(lastSentAt, 10) || nowSec);
+    throw errors.tooMany(`发送过于频繁，请 ${Math.max(1, 60 - elapsed)} 秒后再试`);
+  }
+  const rl = await consumeRateLimit(c.env, RATE_LIMITS.resendVerify, user.id);
+  if (!rl.ok) {
+    throw errors.tooMany(`发送次数已达上限（每小时 3 封），请 ${rl.resetSeconds} 秒后再试`);
+  }
   const row = await c.env.DB.prepare(`SELECT email, nickname, email_verified FROM users WHERE id = ?`)
     .bind(user.id)
     .first<{ email: string; nickname: string; email_verified: number }>();
@@ -318,8 +329,9 @@ app.post('/resend-verification', requireAuth, async (c) => {
   if (row.email_verified === 1) return ok(c, { sent: false, alreadyVerified: true });
   const token = await createEmailVerificationToken(c.env, user.id);
   await sendVerificationEmail(c.env, row.email, row.nickname, token);
+  await c.env.CACHE.put(cooldownKey, String(nowSec), { expirationTtl: 60 });
   await writeAuditLog(c, { action: 'user.resend_verification', targetType: 'user', targetId: user.id, actorId: user.id });
-  return ok(c, { sent: true });
+  return ok(c, { sent: true, remaining: rl.remaining, cooldown: 60 });
 });
 
 app.post('/forgot-password', async (c) => {

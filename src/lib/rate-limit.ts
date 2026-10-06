@@ -26,6 +26,7 @@ export const RATE_LIMITS = {
   notify: { bucket: 'notify', limit: 10, window: 3600 },
   like: { bucket: 'like', limit: 60, window: 60 },
   notification: { bucket: 'notif', limit: 120, window: 60 },
+  resendVerify: { bucket: 'resend-verify', limit: 3, window: 3600 },
 } satisfies Record<string, RateLimitRule>;
 
 /** 客户端指纹：优先 CF-Connecting-IP，回退 UA 哈希 */

@@ -76,6 +76,11 @@ describe('邮箱验证', () => {
     expect(__getMailOutbox()).toHaveLength(1);
 
     await req('/api/auth/verify-email', { method: 'POST', body: { token: tokenFromLatestMail() } });
+    // 新增的 60 秒冷却：清除冷却键后再测「已验证」分支
+    const uid = await (env as unknown as { DB: D1Database }).DB
+      .prepare(`SELECT id FROM users WHERE username = 'unverified2'`)
+      .first<{ id: string }>();
+    await (env as unknown as { CACHE: KVNamespace }).CACHE.delete(`rv-cd:${uid!.id}`);
     const again = await req('/api/auth/resend-verification', { method: 'POST', token });
     expect(again.body.alreadyVerified).toBe(true);
   });
