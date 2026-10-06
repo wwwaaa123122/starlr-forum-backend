@@ -342,7 +342,7 @@ app.get('/moderators', requireAdmin, async (c) => {
   const [assignments, siteWide] = await Promise.all([
     c.env.DB.prepare(
       `SELECT m.user_id AS userId, m.category_id AS categoryId, m.created_at AS createdAt,
-              u.username_raw AS username, u.nickname AS nickname,
+              u.uid AS uid, u.username_raw AS username, u.nickname AS nickname,
               c.name AS categoryName, c.slug AS categorySlug
        FROM moderators m
        JOIN users u ON u.id = m.user_id
@@ -350,7 +350,7 @@ app.get('/moderators', requireAdmin, async (c) => {
        ORDER BY c.sort_order, u.username_raw`,
     ).all(),
     c.env.DB.prepare(
-      `SELECT id AS userId, username_raw AS username, nickname, created_at AS createdAt
+      `SELECT id AS userId, uid AS uid, username_raw AS username, nickname, created_at AS createdAt
        FROM users WHERE role = 'moderator' AND site_wide_moderator = 1 ORDER BY username_raw`,
     ).all(),
   ]);
