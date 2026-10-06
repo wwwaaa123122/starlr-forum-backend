@@ -6,6 +6,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import type { AppEnv } from '../types';
 import { errors, ok } from '../lib/http';
+import { moderationScope, inScope } from '../lib/moderation';
 import { parseJson, parseQuery, paginationSchema, paginationMeta } from '../lib/validate';
 import { RATE_LIMITS, clientFingerprint, consumeRateLimit } from '../lib/rate-limit';
 import { assertNotMuted, requireAuth, optionalAuth, requireVerified } from '../middleware/auth';
@@ -191,9 +192,14 @@ app.get('/:id', optionalAuth, async (c) => {
 
   if (!post) throw errors.notFound('帖子不存在');
   const isDeleted = Boolean(post.isDeleted);
-  const canModerate = user && (user.role === 'admin' || user.role === 'moderator');
   const isAuthor = user && user.id === post.authorId;
-  if (isDeleted && !canModerate && !isAuthor) throw errors.notFound('帖子不存在');
+  // 已删除内容：仅管理员与所辖版块的版主可见（供恢复/复核）；作者与其他人一律 404
+  let canModerate = Boolean(user && user.role === 'admin');
+  if (!canModerate && user && user.role === 'moderator') {
+    const scope = await moderationScope(c.env, user);
+    canModerate = inScope(scope, post.categoryId as string);
+  }
+  if (isDeleted && !canModerate) throw errors.notFound('帖子不存在');
 
   const { results: tagRows } = await c.env.DB.prepare(
     `SELECT t.name FROM post_tags pt JOIN tags t ON t.id = pt.tag_id WHERE pt.post_id = ?`,

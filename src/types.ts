@@ -44,6 +44,8 @@ export interface AuthUser {
   status: 'active' | 'banned';
   email_verified?: number;
   avatar_url: string | null;
+  /** 全站版主：不受版块限制（1 = 全站管辖） */
+  siteWideModerator?: number;
 }
 
 export type AppBindings = { Bindings: Env };

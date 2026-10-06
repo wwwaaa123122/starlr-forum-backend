@@ -25,7 +25,7 @@ export const optionalAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
       const sub = result.payload.sub;
       if (typeof sub === 'string') {
         const user = await c.env.DB.prepare(
-          `SELECT id, uid, username, username_raw, nickname, email, role, status, email_verified, avatar_url
+          `SELECT id, uid, username, username_raw, nickname, email, role, status, email_verified, avatar_url, site_wide_moderator AS siteWideModerator
            FROM users WHERE id = ?`,
         )
           .bind(sub)

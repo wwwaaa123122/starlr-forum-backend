@@ -132,7 +132,9 @@ export async function rotateRefreshToken(
     return { ok: false, reason: 'expired' };
   }
 
-  const user = await env.DB.prepare(`SELECT id, role, status FROM users WHERE id = ?`)
+  const user = await env.DB.prepare(
+    `SELECT id, role, status, site_wide_moderator AS siteWideModerator FROM users WHERE id = ?`,
+  )
     .bind(row.user_id)
     .first<{ id: string; role: string; status: string }>();
   if (!user || user.status !== 'active') return { ok: false, reason: 'invalid' };

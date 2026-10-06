@@ -223,7 +223,8 @@ describe('管理端内容管理', () => {
     expect((await req(`/api/admin/posts/${id}`, { method: 'DELETE', token: mod.accessToken })).status).toBe(200);
     let detail = await req(`/api/posts/${id}`, { token: mod.accessToken });
     expect(detail.body.post.isDeleted).toBe(true);
-    // 作者本人仍可看到自己的已删除帖子，其他游客看不到
+    // 已删除内容：辖区版主可见（供恢复），作者与其他游客一律 404
+    expect((await req(`/api/posts/${id}`, { token: author.accessToken })).status).toBe(404);
     expect((await req(`/api/posts/${id}`)).status).toBe(404);
 
     expect((await req(`/api/admin/posts/${id}/restore`, { method: 'POST', token: mod.accessToken })).status).toBe(200);

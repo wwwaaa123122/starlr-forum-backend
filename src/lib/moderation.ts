@@ -9,8 +9,14 @@ import { errors } from './http';
 
 export type ModerationScope = string[] | '*';
 
-export async function moderationScope(env: Env, user: { id: string; role: string }): Promise<ModerationScope> {
-  if (user.role === 'admin') return '*';
+export interface ScopeUser {
+  id: string;
+  role: string;
+  siteWideModerator?: number;
+}
+
+export async function moderationScope(env: Env, user: ScopeUser): Promise<ModerationScope> {
+  if (user.role === 'admin' || user.siteWideModerator) return '*';
   const { results } = await env.DB.prepare(`SELECT category_id AS cid FROM moderators WHERE user_id = ?`)
     .bind(user.id)
     .all<{ cid: string }>();
@@ -24,7 +30,7 @@ export function inScope(scope: ModerationScope, categoryId: string | null | unde
 
 export async function assertCategoryScope(
   env: Env,
-  user: { id: string; role: string },
+  user: ScopeUser,
   categoryId: string | null | undefined,
 ): Promise<void> {
   const scope = await moderationScope(env, user);

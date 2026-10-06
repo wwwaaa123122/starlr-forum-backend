@@ -308,7 +308,10 @@ app.patch('/users/:id/role', requireAdmin, async (c) => {
     c.env.DB.prepare(`UPDATE users SET role = ?, updated_at = ? WHERE id = ?`).bind(body.role, nowIso(), userId),
     // 版主降为普通用户时，同步清空其全部版块辖区
     ...(target.role === 'moderator' && body.role === 'user'
-      ? [c.env.DB.prepare(`DELETE FROM moderators WHERE user_id = ?`).bind(userId)]
+      ? [
+          c.env.DB.prepare(`DELETE FROM moderators WHERE user_id = ?`).bind(userId),
+          c.env.DB.prepare(`UPDATE users SET site_wide_moderator = 0 WHERE id = ?`).bind(userId),
+        ]
       : []),
   ]);
   await writeAuditLog(c, {
@@ -329,20 +332,29 @@ app.patch('/users/:id/role', requireAdmin, async (c) => {
 // ---------------------------------------------------------------
 const assignModeratorSchema = z.object({
   username: z.string().trim().min(1).max(40),
-  categoryId: z.string().trim().min(1),
+  /** 指定版块；siteWide = true 时可不填（全站管辖） */
+  categoryId: z.string().trim().min(1).optional(),
+  /** 全站版主：不受版块限制 */
+  siteWide: z.boolean().optional(),
 });
 
 app.get('/moderators', requireAdmin, async (c) => {
-  const { results } = await c.env.DB.prepare(
-    `SELECT m.user_id AS userId, m.category_id AS categoryId, m.created_at AS createdAt,
-            u.username_raw AS username, u.nickname AS nickname,
-            c.name AS categoryName, c.slug AS categorySlug
-     FROM moderators m
-     JOIN users u ON u.id = m.user_id
-     JOIN categories c ON c.id = m.category_id
-     ORDER BY c.sort_order, u.username_raw`,
-  ).all();
-  return ok(c, { moderators: results ?? [] });
+  const [assignments, siteWide] = await Promise.all([
+    c.env.DB.prepare(
+      `SELECT m.user_id AS userId, m.category_id AS categoryId, m.created_at AS createdAt,
+              u.username_raw AS username, u.nickname AS nickname,
+              c.name AS categoryName, c.slug AS categorySlug
+       FROM moderators m
+       JOIN users u ON u.id = m.user_id
+       JOIN categories c ON c.id = m.category_id
+       ORDER BY c.sort_order, u.username_raw`,
+    ).all(),
+    c.env.DB.prepare(
+      `SELECT id AS userId, username_raw AS username, nickname, created_at AS createdAt
+       FROM users WHERE role = 'moderator' AND site_wide_moderator = 1 ORDER BY username_raw`,
+    ).all(),
+  ]);
+  return ok(c, { moderators: assignments.results ?? [], siteWide: siteWide.results ?? [] });
 });
 
 app.post('/moderators', requireAdmin, async (c) => {
@@ -358,16 +370,24 @@ app.post('/moderators', requireAdmin, async (c) => {
   if (user.status === 'banned') throw errors.badRequest('不能任命被封禁的用户为版主');
   if (user.role === 'admin') throw errors.badRequest('该用户已是管理员，无需任命版主');
 
-  const category = await c.env.DB.prepare(`SELECT id, name FROM categories WHERE id = ?`)
-    .bind(body.categoryId)
-    .first<{ id: string; name: string }>();
-  if (!category) throw errors.notFound('版块不存在');
-
-  await c.env.DB.prepare(
-    `INSERT INTO moderators (user_id, category_id) VALUES (?, ?) ON CONFLICT (user_id, category_id) DO NOTHING`,
-  )
-    .bind(user.id, category.id)
-    .run();
+  const siteWide = body.siteWide === true;
+  let category: { id: string; name: string } | null = null;
+  if (!siteWide) {
+    if (!body.categoryId) throw errors.badRequest('请选择版块或勾选全站管辖');
+    category = await c.env.DB.prepare(`SELECT id, name FROM categories WHERE id = ?`)
+      .bind(body.categoryId)
+      .first<{ id: string; name: string }>();
+    if (!category) throw errors.notFound('版块不存在');
+    await c.env.DB.prepare(
+      `INSERT INTO moderators (user_id, category_id) VALUES (?, ?) ON CONFLICT (user_id, category_id) DO NOTHING`,
+    )
+      .bind(user.id, category.id)
+      .run();
+  } else {
+    await c.env.DB.prepare(`UPDATE users SET site_wide_moderator = 1, updated_at = ? WHERE id = ?`)
+      .bind(nowIso(), user.id)
+      .run();
+  }
 
   // 普通用户首次任命自动升级为 moderator（使其能进入后台）；已是 moderator 保持不变
   if (user.role === 'user') {
@@ -379,16 +399,33 @@ app.post('/moderators', requireAdmin, async (c) => {
     userId: user.id,
     actorId: admin.id,
     type: 'moderation',
-    content: `您已被任命为「${category.name}」版块的版主`,
+    content: siteWide ? '您已被任命为全站版主' : `您已被任命为「${category!.name}」版块的版主`,
   });
   await writeAuditLog(c, {
     action: 'admin.moderator.assign',
     actorId: admin.id,
     targetType: 'user',
     targetId: user.id,
-    detail: category.name,
+    detail: siteWide ? '全站管辖' : category!.name,
   });
-  return ok(c, { success: true, upgraded: user.role === 'user' });
+  return ok(c, { success: true, upgraded: user.role === 'user', siteWide });
+});
+
+/** 撤销某用户的全部版主权限（所有版块 + 全站标记） */
+app.delete('/moderators/:userId', requireAdmin, async (c) => {
+  const admin = c.get('user')!;
+  const { userId } = c.req.param();
+  await c.env.DB.batch([
+    c.env.DB.prepare(`DELETE FROM moderators WHERE user_id = ?`).bind(userId),
+    c.env.DB.prepare(`UPDATE users SET site_wide_moderator = 0, updated_at = ? WHERE id = ?`).bind(nowIso(), userId),
+  ]);
+  await writeAuditLog(c, {
+    action: 'admin.moderator.remove_all',
+    actorId: admin.id,
+    targetType: 'user',
+    targetId: userId,
+  });
+  return ok(c, { success: true });
 });
 
 app.delete('/moderators/:userId/:categoryId', requireAdmin, async (c) => {
