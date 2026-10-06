@@ -787,6 +787,71 @@ app.post('/reports/:id/dismiss', requireRole('moderator', 'admin'), async (c) =>
 });
 
 // ---------------------------------------------------------------
+// ---------------- 浏览统计 ----------------
+app.get('/views', requireRole('moderator', 'admin'), async (c) => {
+  const db = c.env.DB;
+
+  const [totalsRow, postTotalRow, dailyRows, topRows, recentRows] = await Promise.all([
+    db
+      .prepare(
+        `SELECT
+           COUNT(*) FILTER (WHERE created_at >= datetime('now', 'start of day')) AS today,
+           COUNT(*) FILTER (WHERE created_at >= datetime('now', 'start of day', '-1 day') AND created_at < datetime('now', 'start of day')) AS yesterday,
+           COUNT(*) FILTER (WHERE created_at >= datetime('now', '-7 days')) AS week,
+           COUNT(*) FILTER (WHERE created_at >= datetime('now', '-30 days')) AS month
+         FROM view_events`,
+      )
+      .first<{ today: number; yesterday: number; week: number; month: number }>(),
+    db.prepare(`SELECT COALESCE(SUM(view_count), 0) AS total FROM posts WHERE is_deleted = 0`).first<{ total: number }>(),
+    db
+      .prepare(
+        `SELECT substr(created_at, 1, 10) AS date, COUNT(*) AS views
+         FROM view_events WHERE created_at >= datetime('now', '-13 days')
+         GROUP BY date ORDER BY date`,
+      )
+      .all<{ date: string; views: number }>(),
+    db
+      .prepare(
+        `SELECT v.post_id AS postId, p.title, COUNT(*) AS views
+         FROM view_events v JOIN posts p ON p.id = v.post_id
+         WHERE v.created_at >= datetime('now', '-7 days')
+         GROUP BY v.post_id ORDER BY views DESC LIMIT 10`,
+      )
+      .all<{ postId: string; title: string; views: number }>(),
+    db
+      .prepare(
+        `SELECT v.id, v.post_id AS postId, p.title, v.country, v.city, v.colo, v.device,
+                v.user_id AS userId, u.username_raw AS userName, v.created_at AS createdAt
+         FROM view_events v
+         JOIN posts p ON p.id = v.post_id
+         LEFT JOIN users u ON u.id = v.user_id
+         ORDER BY v.created_at DESC LIMIT 50`,
+      )
+      .all(),
+  ]);
+
+  // 补齐 14 天空缺日期
+  const byDate = new Map((dailyRows.results ?? []).map((r) => [r.date, r.views]));
+  const daily: { date: string; views: number }[] = [];
+  for (let i = 13; i >= 0; i--) {
+    const d = new Date(Date.now() - i * 86_400_000).toISOString().slice(0, 10);
+    daily.push({ date: d, views: byDate.get(d) ?? 0 });
+  }
+
+  return ok(c, {
+    totals: {
+      today: totalsRow?.today ?? 0,
+      yesterday: totalsRow?.yesterday ?? 0,
+      week: totalsRow?.week ?? 0,
+      month: totalsRow?.month ?? 0,
+      allTime: postTotalRow?.total ?? 0,
+    },
+    daily,
+    top: topRows.results ?? [],
+    recent: recentRows.results ?? [],
+  });
+});
+
 // 审计日志
 // ---------------------------------------------------------------
 app.get('/audit-logs', requireAdmin, async (c) => {

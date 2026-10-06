@@ -317,6 +317,25 @@ app.post('/:id/view', async (c) => {
 
   await c.env.CACHE.put(dedupeKey, '1', { expirationTtl: 3600 });
   await bumpPostCounter(c.env, id, 'view_count', 1);
+
+  // 浏览事件（供管理后台「浏览统计」）：Cloudflare IP 库地理 + 粗粒度设备类型
+  const cf = (c.req.raw as unknown as { cf?: IncomingRequestCfProperties }).cf;
+  const ua = c.req.header('user-agent') ?? '';
+  const device = /iPad|Tablet/i.test(ua) || (/Android/i.test(ua) && !/Mobile/i.test(ua))
+    ? 'tablet'
+    : /Mobi/i.test(ua)
+      ? 'mobile'
+      : 'desktop';
+  const viewer = c.get('user');
+  const cleanup = Math.random() < 0.01
+    ? [c.env.DB.prepare(`DELETE FROM view_events WHERE created_at < datetime('now','-30 days')`)]
+    : [];
+  await c.env.DB.batch([
+    c.env.DB.prepare(
+      `INSERT INTO view_events (id, post_id, user_id, country, city, colo, device) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(newId(20), id, viewer?.id ?? null, (cf?.country as string) ?? '', (cf?.city as string) ?? '', (cf?.colo as string) ?? '', device),
+    ...cleanup,
+  ]);
   return ok(c, { counted: true });
 });
 
