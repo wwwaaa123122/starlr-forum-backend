@@ -299,14 +299,29 @@ app.patch('/users/:id/role', requireAdmin, async (c) => {
   const userId = c.req.param('id');
   const body = await parseJson(c, roleSchema);
   if (userId === admin.id) throw errors.badRequest('不能修改自己的角色');
-  const target = await c.env.DB.prepare(`SELECT id FROM users WHERE id = ?`).bind(userId).first<{ id: string }>();
+  const target = await c.env.DB.prepare(`SELECT id, role FROM users WHERE id = ?`)
+    .bind(userId)
+    .first<{ id: string; role: string }>();
   if (!target) throw errors.notFound('用户不存在');
 
-  await c.env.DB.prepare(`UPDATE users SET role = ?, updated_at = ? WHERE id = ?`)
-    .bind(body.role, nowIso(), userId)
-    .run();
-  await writeAuditLog(c, { action: 'admin.user.role', actorId: admin.id, targetType: 'user', targetId: userId, detail: `→ ${body.role}` });
-  return ok(c, { success: true });
+  await c.env.DB.batch([
+    c.env.DB.prepare(`UPDATE users SET role = ?, updated_at = ? WHERE id = ?`).bind(body.role, nowIso(), userId),
+    // 版主降为普通用户时，同步清空其全部版块辖区
+    ...(target.role === 'moderator' && body.role === 'user'
+      ? [c.env.DB.prepare(`DELETE FROM moderators WHERE user_id = ?`).bind(userId)]
+      : []),
+  ]);
+  await writeAuditLog(c, {
+    action: 'admin.user.role',
+    actorId: admin.id,
+    targetType: 'user',
+    targetId: userId,
+    detail:
+      target.role === 'moderator' && body.role === 'user'
+        ? '版主 → 用户（辖区已清空）'
+        : `→ ${body.role}`,
+  });
+  return ok(c, { success: true, scopeCleared: target.role === 'moderator' && body.role === 'user' });
 });
 
 // ---------------------------------------------------------------
