@@ -9,6 +9,7 @@ import type { AppEnv } from '../types';
 import { errors, ok } from '../lib/http';
 import { parseJson, parseQuery, paginationSchema, paginationMeta } from '../lib/validate';
 import { requireRole } from '../middleware/auth';
+import { moderationScope, inScope, assertCategoryScope, moderatorLabel } from '../lib/moderation';
 import { newId, nowIso } from '../lib/ids';
 import { writeAuditLog } from '../lib/audit';
 import { createNotification } from '../lib/notify';
@@ -166,7 +167,7 @@ app.get('/stats', async (c) => {
 // ---------------------------------------------------------------
 // 用户管理
 // ---------------------------------------------------------------
-app.get('/users', async (c) => {
+app.get('/users', requireAdmin, async (c) => {
   const { page, pageSize, query } = parseQuery(
     c,
     z.object({
@@ -309,6 +310,93 @@ app.patch('/users/:id/role', requireAdmin, async (c) => {
 });
 
 // ---------------------------------------------------------------
+// 版主任命（按版块授权）
+// ---------------------------------------------------------------
+const assignModeratorSchema = z.object({
+  username: z.string().trim().min(1).max(40),
+  categoryId: z.string().trim().min(1),
+});
+
+app.get('/moderators', requireAdmin, async (c) => {
+  const { results } = await c.env.DB.prepare(
+    `SELECT m.user_id AS userId, m.category_id AS categoryId, m.created_at AS createdAt,
+            u.username_raw AS username, u.nickname AS nickname,
+            c.name AS categoryName, c.slug AS categorySlug
+     FROM moderators m
+     JOIN users u ON u.id = m.user_id
+     JOIN categories c ON c.id = m.category_id
+     ORDER BY c.sort_order, u.username_raw`,
+  ).all();
+  return ok(c, { moderators: results ?? [] });
+});
+
+app.post('/moderators', requireAdmin, async (c) => {
+  const admin = c.get('user')!;
+  const body = await parseJson(c, assignModeratorSchema);
+
+  const user = await c.env.DB.prepare(
+    `SELECT id, role, status FROM users WHERE username_raw = ? OR LOWER(username_raw) = LOWER(?) OR uid = ?`,
+  )
+    .bind(body.username, body.username, body.username)
+    .first<{ id: string; role: string; status: string }>();
+  if (!user) throw errors.notFound('用户不存在');
+  if (user.status === 'banned') throw errors.badRequest('不能任命被封禁的用户为版主');
+  if (user.role === 'admin') throw errors.badRequest('该用户已是管理员，无需任命版主');
+
+  const category = await c.env.DB.prepare(`SELECT id, name FROM categories WHERE id = ?`)
+    .bind(body.categoryId)
+    .first<{ id: string; name: string }>();
+  if (!category) throw errors.notFound('版块不存在');
+
+  await c.env.DB.prepare(
+    `INSERT INTO moderators (user_id, category_id) VALUES (?, ?) ON CONFLICT (user_id, category_id) DO NOTHING`,
+  )
+    .bind(user.id, category.id)
+    .run();
+
+  // 普通用户首次任命自动升级为 moderator（使其能进入后台）；已是 moderator 保持不变
+  if (user.role === 'user') {
+    await c.env.DB.prepare(`UPDATE users SET role = 'moderator', updated_at = ? WHERE id = ?`)
+      .bind(nowIso(), user.id)
+      .run();
+  }
+  await createNotification(c.env, {
+    userId: user.id,
+    actorId: admin.id,
+    type: 'moderation',
+    content: `您已被任命为「${category.name}」版块的版主`,
+  });
+  await writeAuditLog(c, {
+    action: 'admin.moderator.assign',
+    actorId: admin.id,
+    targetType: 'user',
+    targetId: user.id,
+    detail: category.name,
+  });
+  return ok(c, { success: true, upgraded: user.role === 'user' });
+});
+
+app.delete('/moderators/:userId/:categoryId', requireAdmin, async (c) => {
+  const admin = c.get('user')!;
+  const { userId, categoryId } = c.req.param();
+  const res = await c.env.DB.prepare(`DELETE FROM moderators WHERE user_id = ? AND category_id = ?`)
+    .bind(userId, categoryId)
+    .run();
+  if (!res.meta.changes) throw errors.notFound('该任命不存在');
+  const category = await c.env.DB.prepare(`SELECT name FROM categories WHERE id = ?`)
+    .bind(categoryId)
+    .first<{ name: string }>();
+  await writeAuditLog(c, {
+    action: 'admin.moderator.remove',
+    actorId: admin.id,
+    targetType: 'user',
+    targetId: userId,
+    detail: category?.name ?? categoryId,
+  });
+  return ok(c, { success: true });
+});
+
+// ---------------------------------------------------------------
 // 帖子管理（置顶/加精/删除/恢复）
 // ---------------------------------------------------------------
 app.get('/posts', requireRole('moderator', 'admin'), async (c) => {
@@ -320,6 +408,11 @@ app.get('/posts', requireRole('moderator', 'admin'), async (c) => {
       status: z.enum(['all', 'normal', 'deleted']).default('all'),
     }),
   );
+  const me = c.get('user')!;
+  const scope = await moderationScope(c.env, me);
+  if (scope !== '*' && scope.length === 0) {
+    return ok(c, { posts: [], pagination: paginationMeta(page, pageSize, 0), moderatorScope: [] });
+  }
   const offset = (page - 1) * pageSize;
   const where: string[] = [];
   const params: unknown[] = [];
@@ -328,6 +421,10 @@ app.get('/posts', requireRole('moderator', 'admin'), async (c) => {
   if (query) {
     where.push('p.title LIKE ? ESCAPE \'\'');
     params.push(`%${query.replace(/[%_\\]/g, '')}%`);
+  }
+  if (scope !== '*') {
+    where.push(`p.category_id IN (${scope.map(() => '?').join(',')})`);
+    params.push(...scope);
   }
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const countRow = await c.env.DB.prepare(`SELECT COUNT(*) AS total FROM posts p ${whereSql}`)
@@ -342,18 +439,19 @@ app.get('/posts', requireRole('moderator', 'admin'), async (c) => {
   )
     .bind(...params, pageSize, offset)
     .all();
-  return ok(c, { posts: results ?? [], pagination: paginationMeta(page, pageSize, countRow?.total ?? 0) });
+  return ok(c, { posts: results ?? [], pagination: paginationMeta(page, pageSize, countRow?.total ?? 0), moderatorScope: scope === '*' ? null : scope });
 });
 
 const moderationAction = (action: 'pin' | 'unpin' | 'feature' | 'unfeature') =>
   async (c: Context<AppEnv>) => {
     const admin = c.get('user')!;
     const postId = c.req.param('id');
-    const post = await c.env.DB.prepare(`SELECT id, is_deleted FROM posts WHERE id = ?`)
+    const post = await c.env.DB.prepare(`SELECT id, is_deleted, category_id FROM posts WHERE id = ?`)
       .bind(postId)
-      .first<{ id: string; is_deleted: number }>();
+      .first<{ id: string; is_deleted: number; category_id: string }>();
     if (!post) throw errors.notFound('帖子不存在');
     if (post.is_deleted) throw errors.badRequest('帖子已删除，请先恢复');
+    await assertCategoryScope(c.env, admin, post.category_id);
 
     const sets: Record<string, string> = {
       pin: 'is_pinned = 1',
@@ -376,11 +474,12 @@ app.post('/posts/:id/unfeature', requireRole('moderator', 'admin'), moderationAc
 app.post('/posts/:id/restore', requireRole('moderator', 'admin'), async (c) => {
   const admin = c.get('user')!;
   const postId = c.req.param('id');
-  const post = await c.env.DB.prepare(`SELECT id, is_deleted, deleted_by FROM posts WHERE id = ?`)
+  const post = await c.env.DB.prepare(`SELECT id, is_deleted, deleted_by, category_id FROM posts WHERE id = ?`)
     .bind(postId)
-    .first<{ id: string; is_deleted: number; deleted_by: string | null }>();
+    .first<{ id: string; is_deleted: number; deleted_by: string | null; category_id: string }>();
   if (!post) throw errors.notFound('帖子不存在');
   if (!post.is_deleted) throw errors.badRequest('帖子未处于删除状态');
+  await assertCategoryScope(c.env, admin, post.category_id);
 
   await c.env.DB.prepare(
     `UPDATE posts SET is_deleted = 0, deleted_at = NULL, deleted_by = NULL, updated_at = ? WHERE id = ?`,
@@ -394,11 +493,12 @@ app.post('/posts/:id/restore', requireRole('moderator', 'admin'), async (c) => {
 app.delete('/posts/:id', requireRole('moderator', 'admin'), async (c) => {
   const admin = c.get('user')!;
   const postId = c.req.param('id');
-  const post = await c.env.DB.prepare(`SELECT id, author_id, is_deleted FROM posts WHERE id = ?`)
+  const post = await c.env.DB.prepare(`SELECT id, author_id, is_deleted, category_id FROM posts WHERE id = ?`)
     .bind(postId)
-    .first<{ id: string; author_id: string; is_deleted: number }>();
+    .first<{ id: string; author_id: string; is_deleted: number; category_id: string }>();
   if (!post) throw errors.notFound('帖子不存在');
   if (post.is_deleted) throw errors.badRequest('帖子已处于删除状态');
+  await assertCategoryScope(c.env, admin, post.category_id);
 
   await c.env.DB.prepare(`UPDATE posts SET is_deleted = 1, deleted_at = ?, deleted_by = ? WHERE id = ?`)
     .bind(nowIso(), admin.id, postId)
@@ -407,7 +507,7 @@ app.delete('/posts/:id', requireRole('moderator', 'admin'), async (c) => {
     userId: post.author_id,
     actorId: admin.id,
     type: 'moderation',
-    content: '您的帖子已被管理员删除',
+    content: `您的帖子已被${moderatorLabel(admin.role)}删除`,
   });
   await writeAuditLog(c, { action: 'admin.post.delete', actorId: admin.id, targetType: 'post', targetId: postId });
   return ok(c, { success: true });
@@ -418,15 +518,26 @@ app.delete('/posts/:id', requireRole('moderator', 'admin'), async (c) => {
 // ---------------------------------------------------------------
 app.get('/replies', requireRole('moderator', 'admin'), async (c) => {
   const { page, pageSize } = parseQuery(c, paginationSchema);
+  const me = c.get('user')!;
+  const scope = await moderationScope(c.env, me);
   const offset = (page - 1) * pageSize;
-  const countRow = await c.env.DB.prepare(`SELECT COUNT(*) AS total FROM replies`).first<{ total: number }>();
+  const scopeSql = scope === '*' ? '' : `WHERE p.category_id IN (${(scope as string[]).map(() => '?').join(',')})`;
+  const scopeParams = scope === '*' ? [] : (scope as string[]);
+  if (scope !== '*' && (scope as string[]).length === 0) {
+    return ok(c, { replies: [], pagination: paginationMeta(page, pageSize, 0) });
+  }
+  const countRow = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS total FROM replies r JOIN posts p ON p.id = r.post_id ${scopeSql}`,
+  )
+    .bind(...scopeParams)
+    .first<{ total: number }>();
   const { results } = await c.env.DB.prepare(
     `SELECT r.id, r.content, r.is_deleted AS isDeleted, r.created_at AS createdAt,
             u.username_raw AS authorName, p.id AS postId, p.title AS postTitle
      FROM replies r JOIN users u ON u.id = r.author_id JOIN posts p ON p.id = r.post_id
-     ORDER BY r.created_at DESC LIMIT ? OFFSET ?`,
+     ${scopeSql} ORDER BY r.created_at DESC LIMIT ? OFFSET ?`,
   )
-    .bind(pageSize, offset)
+    .bind(...scopeParams, pageSize, offset)
     .all();
   return ok(c, { replies: results ?? [], pagination: paginationMeta(page, pageSize, countRow?.total ?? 0) });
 });
@@ -434,11 +545,15 @@ app.get('/replies', requireRole('moderator', 'admin'), async (c) => {
 app.delete('/replies/:id', requireRole('moderator', 'admin'), async (c) => {
   const admin = c.get('user')!;
   const replyId = c.req.param('id');
-  const reply = await c.env.DB.prepare(`SELECT id, author_id, post_id, is_deleted FROM replies WHERE id = ?`)
+  const reply = await c.env.DB.prepare(
+    `SELECT r.id, r.author_id, r.post_id, r.is_deleted, p.category_id AS category_id
+     FROM replies r JOIN posts p ON p.id = r.post_id WHERE r.id = ?`,
+  )
     .bind(replyId)
-    .first<{ id: string; author_id: string; post_id: string; is_deleted: number }>();
+    .first<{ id: string; author_id: string; post_id: string; is_deleted: number; category_id: string }>();
   if (!reply) throw errors.notFound('回复不存在');
   if (reply.is_deleted) throw errors.badRequest('回复已处于删除状态');
+  await assertCategoryScope(c.env, admin, reply.category_id);
 
   await c.env.DB.batch([
     c.env.DB.prepare(`UPDATE replies SET is_deleted = 1, deleted_at = ?, deleted_by = ? WHERE id = ?`).bind(
@@ -453,7 +568,7 @@ app.delete('/replies/:id', requireRole('moderator', 'admin'), async (c) => {
     userId: reply.author_id,
     actorId: admin.id,
     type: 'moderation',
-    content: '您的回复已被管理员删除',
+    content: `您的回复已被${moderatorLabel(admin.role)}删除`,
   });
   await writeAuditLog(c, { action: 'admin.reply.delete', actorId: admin.id, targetType: 'reply', targetId: replyId });
   return ok(c, { success: true });
@@ -462,11 +577,15 @@ app.delete('/replies/:id', requireRole('moderator', 'admin'), async (c) => {
 app.post('/replies/:id/restore', requireRole('moderator', 'admin'), async (c) => {
   const admin = c.get('user')!;
   const replyId = c.req.param('id');
-  const reply = await c.env.DB.prepare(`SELECT id, author_id, post_id, is_deleted FROM replies WHERE id = ?`)
+  const reply = await c.env.DB.prepare(
+    `SELECT r.id, r.author_id, r.post_id, r.is_deleted, p.category_id AS category_id
+     FROM replies r JOIN posts p ON p.id = r.post_id WHERE r.id = ?`,
+  )
     .bind(replyId)
-    .first<{ id: string; author_id: string; post_id: string; is_deleted: number }>();
+    .first<{ id: string; author_id: string; post_id: string; is_deleted: number; category_id: string }>();
   if (!reply) throw errors.notFound('回复不存在');
   if (!reply.is_deleted) throw errors.badRequest('回复未处于删除状态');
+  await assertCategoryScope(c.env, admin, reply.category_id);
 
   await c.env.DB.batch([
     c.env.DB.prepare(
@@ -638,11 +757,34 @@ app.get('/reports', requireRole('moderator', 'admin'), async (c) => {
     c,
     z.object({ ...paginationSchema.shape, status: z.enum(['pending', 'resolved', 'dismissed', 'all']).default('pending') }),
   );
+  const me = c.get('user')!;
+  const scope = await moderationScope(c.env, me);
+  if (scope !== '*' && (scope as string[]).length === 0) {
+    return ok(c, { reports: [], pagination: paginationMeta(page, pageSize, 0) });
+  }
   const offset = (page - 1) * pageSize;
-  const whereSql = status === 'all' ? '' : 'WHERE r.status = ?';
-  const params: unknown[] = status === 'all' ? [] : [status];
+  const where: string[] = [];
+  const params: unknown[] = [];
+  if (status !== 'all') {
+    where.push('r.status = ?');
+    params.push(status);
+  }
+  if (scope !== '*') {
+    // 帖子举报 → 帖子所属版；回复举报 → 该回复所在帖子的版；用户举报无版块归属（仅管理员可见）
+    where.push(
+      `CASE r.target_type WHEN 'post' THEN p.category_id WHEN 'reply' THEN pp.category_id ELSE NULL END IN (${(scope as string[]).map(() => '?').join(',')})`,
+    );
+    params.push(...(scope as string[]));
+  }
+  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
-  const countRow = await c.env.DB.prepare(`SELECT COUNT(*) AS total FROM reports r ${whereSql}`)
+  const countRow = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS total FROM reports r
+     LEFT JOIN posts p ON r.target_type = 'post' AND p.id = r.target_id
+     LEFT JOIN replies rp ON r.target_type = 'reply' AND rp.id = r.target_id
+     LEFT JOIN posts pp ON r.target_type = 'reply' AND pp.id = rp.post_id
+     ${whereSql}`,
+  )
     .bind(...params)
     .first<{ total: number }>();
   const { results } = await c.env.DB.prepare(
@@ -661,6 +803,7 @@ app.get('/reports', requireRole('moderator', 'admin'), async (c) => {
      LEFT JOIN users pu ON pu.id = p.author_id
      LEFT JOIN users ru2 ON ru2.id = rp.author_id
      LEFT JOIN users u2 ON r.target_type = 'user' AND u2.id = r.target_id
+     LEFT JOIN posts pp ON r.target_type = 'reply' AND pp.id = rp.post_id
      ${whereSql} ORDER BY r.created_at DESC LIMIT ? OFFSET ?`,
   )
     .bind(...params, pageSize, offset)
@@ -688,15 +831,28 @@ app.post('/reports/:id/resolve', requireRole('moderator', 'admin'), async (c) =>
   // 定位被举报内容与其作者（举报用户时 target 即用户）
   const target = await c.env.DB.prepare(
     `SELECT r.target_type AS targetType, r.target_id AS targetId,
-            p.author_id AS postAuthor, rp.author_id AS replyAuthor
+            p.author_id AS postAuthor, rp.author_id AS replyAuthor,
+            p.category_id AS postCategory, pp.category_id AS replyCategory
      FROM reports r
      LEFT JOIN posts p ON r.target_type = 'post' AND p.id = r.target_id
      LEFT JOIN replies rp ON r.target_type = 'reply' AND rp.id = r.target_id
+     LEFT JOIN posts pp ON r.target_type = 'reply' AND pp.id = rp.post_id
      WHERE r.id = ?`,
   )
     .bind(reportId)
-    .first<{ targetType: string; targetId: string; postAuthor: string | null; replyAuthor: string | null }>();
+    .first<{
+      targetType: string;
+      targetId: string;
+      postAuthor: string | null;
+      replyAuthor: string | null;
+      postCategory: string | null;
+      replyCategory: string | null;
+    }>();
   const targetUserId = target?.targetType === 'user' ? target.targetId : (target?.postAuthor ?? target?.replyAuthor);
+  // 辖区校验：帖子/回复举报必须落在版主所辖版块；用户举报仅管理员可处理
+  const targetCategoryId =
+    target?.targetType === 'post' ? target.postCategory : target?.targetType === 'reply' ? target.replyCategory : null;
+  await assertCategoryScope(c.env, admin, targetCategoryId);
 
   let finalNote = body.note;
 
@@ -776,6 +932,20 @@ app.post('/reports/:id/dismiss', requireRole('moderator', 'admin'), async (c) =>
     .first<{ id: string; status: string }>();
   if (!report) throw errors.notFound('举报不存在');
   if (report.status !== 'pending') throw errors.badRequest('举报已被处理');
+
+  const target = await c.env.DB.prepare(
+    `SELECT r.target_type AS targetType, p.category_id AS postCategory, pp.category_id AS replyCategory
+     FROM reports r
+     LEFT JOIN posts p ON r.target_type = 'post' AND p.id = r.target_id
+     LEFT JOIN replies rp ON r.target_type = 'reply' AND rp.id = r.target_id
+     LEFT JOIN posts pp ON r.target_type = 'reply' AND pp.id = rp.post_id
+     WHERE r.id = ?`,
+  )
+    .bind(reportId)
+    .first<{ targetType: string; postCategory: string | null; replyCategory: string | null }>();
+  const targetCategoryId =
+    target?.targetType === 'post' ? target.postCategory : target?.targetType === 'reply' ? target.replyCategory : null;
+  await assertCategoryScope(c.env, admin, targetCategoryId);
 
   await c.env.DB.prepare(
     `UPDATE reports SET status = 'dismissed', handled_by = ?, handled_at = ?, resolution_note = ? WHERE id = ?`,

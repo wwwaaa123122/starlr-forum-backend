@@ -11,6 +11,14 @@ async function makeAdmin(role: 'admin' | 'moderator' = 'admin') {
   return user;
 }
 
+/** 按帖子所属版块授予版主辖区（新版主模型：无辖区则无权操作） */
+async function assignScopeByPost(modId: string, postId: string) {
+  await (env.DB as unknown as D1Database)
+    .prepare(`INSERT OR IGNORE INTO moderators (user_id, category_id) SELECT ?, category_id FROM posts WHERE id = ?`)
+    .bind(modId, postId)
+    .run();
+}
+
 describe('管理员 API 权限', () => {
   it('普通用户访问管理 API → 403', async () => {
     const user = await createUser({ username: 'plainuser' });
@@ -210,6 +218,7 @@ describe('管理端内容管理', () => {
     const mod = await makeAdmin('moderator');
     const author = await createUser({ username: 'restoreauthor' });
     const { id } = (await createPost(author.accessToken)).body;
+    await assignScopeByPost(mod.id, id);
 
     expect((await req(`/api/admin/posts/${id}`, { method: 'DELETE', token: mod.accessToken })).status).toBe(200);
     let detail = await req(`/api/posts/${id}`, { token: mod.accessToken });
@@ -226,6 +235,7 @@ describe('管理端内容管理', () => {
     const mod = await makeAdmin('moderator');
     const author = await createUser({ username: 'featureauthor' });
     const { id } = (await createPost(author.accessToken)).body;
+    await assignScopeByPost(mod.id, id);
     await req(`/api/admin/posts/${id}/pin`, { method: 'POST', token: mod.accessToken });
     await req(`/api/admin/posts/${id}/feature`, { method: 'POST', token: mod.accessToken });
     const detail = await req(`/api/posts/${id}`);
@@ -238,6 +248,7 @@ describe('管理端内容管理', () => {
     const author = await createUser({ username: 'replydelauthor' });
     const commenter = await createUser({ username: 'replydelcommenter' });
     const { id } = (await createPost(author.accessToken)).body;
+    await assignScopeByPost(mod.id, id);
     const reply = await req(`/api/posts/${id}/replies`, {
       method: 'POST',
       token: commenter.accessToken,
