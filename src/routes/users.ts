@@ -11,9 +11,11 @@ async function findUser(c: { env: AppEnv['Bindings'] }, username: string) {
   return c.env.DB.prepare(
     `SELECT id, uid, username, username_raw, nickname, avatar_url, bio, role, status,
             post_count, reply_count, created_at
-     FROM users WHERE username = ? OR username_raw = ? OR nickname = ? LIMIT 1`,
+     FROM users WHERE username = ? OR username_raw = ? OR nickname = ?
+     ORDER BY CASE WHEN username_raw = ? THEN 0 WHEN username = ? THEN 1 ELSE 2 END, uid
+     LIMIT 1`,
   )
-    .bind(username.toLowerCase(), username, username)
+    .bind(username.toLowerCase(), username, username, username, username.toLowerCase())
     .first<Record<string, unknown>>();
 }
 

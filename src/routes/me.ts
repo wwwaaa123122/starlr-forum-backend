@@ -58,6 +58,10 @@ app.patch('/', async (c) => {
   const sets: string[] = [];
   const values: unknown[] = [];
   if (body.nickname !== undefined) {
+    const taken = await c.env.DB.prepare(`SELECT id FROM users WHERE nickname = ? AND id != ?`)
+      .bind(body.nickname, user.id)
+      .first<{ id: string }>();
+    if (taken) throw errors.conflict('该昵称已被其他用户使用');
     sets.push('nickname = ?');
     values.push(body.nickname);
   }
