@@ -25,7 +25,7 @@ describe('版主辖区权限', () => {
     const admin = await createUser({ username: 'scopeadmin' });
     await env.DB.prepare(`UPDATE users SET role='admin' WHERE id=?`).bind(admin.id).run();
     const cats = await req('/api/categories');
-    const [catA, catB] = cats.body.categories as { id: string; name: string }[];
+    const [catA, catB] = (cats.body.categories as { id: string; name: string; postPolicy: string }[]).filter((c) => c.postPolicy === 'everyone');
 
     const author = await createUser({ username: 'scopeauthor' });
     const postA = await createPostIn(author.accessToken, catA.id, 'A版帖子');
@@ -61,7 +61,7 @@ describe('版主辖区权限', () => {
 
   it('回复删除只限所辖版（按帖子所属版判定）', async () => {
     const cats = await req('/api/categories');
-    const [catA, catB] = cats.body.categories as { id: string }[];
+    const [catA, catB] = (cats.body.categories as { id: string; postPolicy: string }[]).filter((c) => c.postPolicy === 'everyone');
     const author = await createUser({ username: 'replyauthor' });
     const postA = await createPostIn(author.accessToken, catA.id, '回复测试A');
     const postB = await createPostIn(author.accessToken, catB.id, '回复测试B');
@@ -77,7 +77,7 @@ describe('版主辖区权限', () => {
 
   it('举报列表与处理只限所辖版；经举报可禁言作者；用户列表 403', async () => {
     const cats = await req('/api/categories');
-    const [catA, catB] = cats.body.categories as { id: string }[];
+    const [catA, catB] = (cats.body.categories as { id: string; postPolicy: string }[]).filter((c) => c.postPolicy === 'everyone');
     const reporter = await createUser({ username: 'rep reporter'.replace(' ', '') });
     const badA = await createUser({ username: 'baduserA' });
     const badB = await createUser({ username: 'baduserB' });

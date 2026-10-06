@@ -130,10 +130,13 @@ app.post('/', requireAuth, requireVerified, async (c) => {
 
   const body = await parseJson(c, createPostSchema);
 
-  const category = await c.env.DB.prepare(`SELECT id FROM categories WHERE id = ? OR slug = ?`)
+  const category = await c.env.DB.prepare(`SELECT id, post_policy AS postPolicy FROM categories WHERE id = ? OR slug = ?`)
     .bind(body.categoryId, body.categoryId)
-    .first<{ id: string }>();
+    .first<{ id: string; postPolicy: string }>();
   if (!category) throw errors.badRequest('分类不存在', 'CATEGORY_NOT_FOUND');
+  if (category.postPolicy === 'staff' && !['moderator', 'admin'].includes(user.role)) {
+    throw errors.forbidden('该版块仅限版主及以上发布');
+  }
 
   // 标签去重与规范化
   const tagNames = [...new Set(body.tags.map((t) => t.trim()).filter(Boolean))].slice(0, 5);
@@ -249,6 +252,12 @@ app.patch('/:id', requireAuth, async (c) => {
     values.push(body.content);
   }
   if (body.categoryId !== undefined) {
+    const targetPolicy = await c.env.DB.prepare(`SELECT post_policy AS postPolicy FROM categories WHERE id = ? OR slug = ?`)
+      .bind(body.categoryId, body.categoryId)
+      .first<{ postPolicy: string }>();
+    if (targetPolicy?.postPolicy === 'staff' && !['moderator', 'admin'].includes(user.role)) {
+      throw errors.forbidden('该版块仅限版主及以上发布');
+    }
     const category = await c.env.DB.prepare(`SELECT id FROM categories WHERE id = ? OR slug = ?`)
       .bind(body.categoryId, body.categoryId)
       .first<{ id: string }>();

@@ -49,11 +49,10 @@ describe('用户列表状态与禁言联动', () => {
 
   it('公开热门标签接口：返回使用数排序的标签', async () => {
     const u = await createUser({ username: 'tagposter' });
-    const cats = await req('/api/categories');
     await req('/api/posts', {
       method: 'POST',
       token: u.accessToken,
-      body: { title: '标签测试帖', content: '内容', categoryId: cats.body.categories[0].id, tags: ['cloudflare', 'react'] },
+      body: { title: '标签测试帖', content: '内容', categoryId: 'cat0tech000000001', tags: ['cloudflare', 'react'] },
     });
     const res = await req('/api/posts/tags');
     expect(res.status).toBe(200);

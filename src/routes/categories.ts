@@ -15,7 +15,7 @@ app.get('/', async (c) => {
     return ok(c, cached as Record<string, unknown>);
   }
   const { results } = await c.env.DB.prepare(
-    `SELECT id, name, slug, description, icon, sort_order AS sortOrder, post_count AS postCount
+    `SELECT id, name, slug, description, icon, sort_order AS sortOrder, post_count AS postCount, post_policy AS postPolicy
      FROM categories ORDER BY sort_order ASC, name ASC`,
   ).all();
   const payload = { categories: results ?? [] };
