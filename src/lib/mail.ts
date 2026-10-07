@@ -84,7 +84,7 @@ export interface MailDeliveryResult {
 /** Resend 投递：KV config:mail 优先，env（RESEND_API_KEY / MAIL_FROM）兜底 */
 export async function deliverViaResend(env: Env, recipients: string[], subject: string, html: string, text: string): Promise<MailDeliveryResult> {
   let apiKey = env.RESEND_API_KEY;
-  let from = env.MAIL_FROM || 'Starlr Forum <no-reply@182030.xyz>';
+  let from = env.MAIL_FROM || '星辰旅人论坛 <no-reply@182030.xyz>';
   let source = 'env';
   try {
     const raw = await env.CACHE.get('config:mail');
@@ -117,7 +117,7 @@ export async function deliverViaResend(env: Env, recipients: string[], subject: 
       console.error(`[mail] Resend 发送失败 ${res.status}:`, msg);
       return { ok: false, message: `Resend HTTP ${res.status}: ${msg}` };
     }
-    return { ok: true, message: `发送成功（配置来源：${source === 'kv' ? '管理后台' : '环境变量'}）` };
+    return { ok: true, message: `发送成功｜From: ${from}｜配置来源：${source === 'kv' ? '管理后台' : '环境变量'}` };
   } catch (e) {
     console.error('[mail] Resend 请求异常:', e instanceof Error ? e.message : e);
     return { ok: false, message: `请求异常：${e instanceof Error ? e.message : String(e)}` };

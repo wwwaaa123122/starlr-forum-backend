@@ -110,3 +110,10 @@ npx wrangler secret put RESEND_API_KEY      --name forum-backend          # 尚�
 - f 站（`forum-frontend`）已从"纯 assets 无绑定"升级为薄 Worker（`src/index-f.ts`）：仅 robots/sitemap/feed 三个路径进 Worker（`run_worker_first` 白名单），其余保持 assets 直出；**零 D1/KV 绑定**不变。
 - 站内 SEO 配置在管理后台「服务配置 → SEO / 搜索引擎」：canonical 主域、百度/Google/Bing 站长验证码、百度主动推送 token（填后发帖自动推送）。
 - 方案全文见 `docs/SEO方案.md`。
+
+### 邮件发件人说明（Resend Return-Path）
+
+- 显示发件人（`From:` 头）统一为 `星辰旅人论坛 <no-reply@182030.xyz>`（vars `MAIL_FROM`，KV `config:mail.from` 可覆盖，代码兜底同值）。
+- 收到形如 `010601a...-<uuid>-000000@rsend.182030.xyz` 的地址**不是发件人**，而是 Resend 自动生成的**退信信封地址（Return-Path / MAIL FROM）**，用于接收 bounce；其 MX（`rsend.182030.xyz` → Amazon SES）与 SPF/DKIM 由 Resend 域名验证时配置，**不要试图改成 no-reply@**（会造成退信丢失且可能 SPF 不对齐）。
+- 邮件客户端里的「由 rsend.182030.xyz 代发」提示同理，是 From 域与信封域不同导致的，属正常。
+- 管理后台「服务配置 → 邮件 → 测试连通」会回显实际生效的 From 与配置来源，便于核对。

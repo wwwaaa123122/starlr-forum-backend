@@ -47,7 +47,7 @@
     "REFRESH_TOKEN_TTL": "2592000",
     "PASSWORD_ITERATIONS": "100000",
     "TURNSTILE_SITE_KEY": "0x4AAAAAAFOSQFHmv_Mdvjrg",
-    "MAIL_FROM": "Starlr Forum <no-reply@182030.xyz>"
+    "MAIL_FROM": "星辰旅人论坛 <no-reply@182030.xyz>"
   },
   // 生产密钥（JWT_SIGNING_KEYS / TURNSTILE_SECRET_KEY）通过 wrangler secret put 注入：
   //   node scripts/generate-jwt-keys.mjs --print | npx wrangler secret put JWT_SIGNING_KEYS -c wrangler.x.jsonc
