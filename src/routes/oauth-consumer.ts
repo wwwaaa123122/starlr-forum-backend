@@ -14,7 +14,7 @@
  *         POST /api/auth/oauth/exchange（本文件，挂载在 /api/auth/oauth）
  *         —— 由**发起请求的 Worker 自己签发** JWT（x 站拿 x 的 key，f 站拿 i 的 key），
  *         各前端 token 与其 API 域名严格匹配
- *  - 账号关联优先级：github_id 精确匹配 → 已验证邮箱匹配（自动绑定）→ 新建用户
+ *  - 账号关联优先级：**已验证邮箱匹配（自动绑定，邮箱为最高依据）** → github_id 匹配 → 新建用户
  */
 import { Hono } from 'hono';
 import type { Context } from 'hono';
@@ -167,23 +167,41 @@ app.get('/callback/:provider', async (c) => {
     verifiedEmail = emails.find((e) => e.primary && e.verified)?.email ?? emails.find((e) => e.verified)?.email ?? null;
   }
 
-  // 3) 找到 / 建立论坛账号
+  // 3) 找到 / 建立论坛账号 —— **邮箱优先**：
+  //    ① GitHub 已验证邮箱命中论坛账号 → 绑定到该账号并登录（github_id 若已绑在别的账号上，迁移过来）
+  //    ② 否则 github_id 精确匹配
+  //    ③ 都没有 → 新建
   const db = c.env.DB;
-  let row = await db
-    .prepare(`SELECT id, uid, username_raw, nickname, role, status, email, email_verified FROM users WHERE github_id = ? LIMIT 1`)
-    .bind(String(ghUser.id))
-    .first<{ id: string; uid: number; username_raw: string; nickname: string; role: string; status: string; email: string; email_verified: number }>();
+  type UserRow = { id: string; uid: number; username_raw: string; nickname: string; role: string; status: string; email: string; email_verified: number };
+  let row: UserRow | null = null;
+  let rebindFrom: string | null = null;
 
-  if (!row && verifiedEmail) {
+  if (verifiedEmail) {
     row = await db
       .prepare(`SELECT id, uid, username_raw, nickname, role, status, email, email_verified FROM users WHERE email = ? LIMIT 1`)
       .bind(verifiedEmail.toLowerCase())
-      .first();
+      .first<UserRow>();
     if (row) {
+      const owner = await db.prepare(`SELECT id FROM users WHERE github_id = ? LIMIT 1`).bind(String(ghUser.id)).first<{ id: string }>();
+      if (owner && owner.id !== row.id) rebindFrom = owner.id;
+      if (rebindFrom) {
+        await db.prepare(`UPDATE users SET github_id = NULL, updated_at = ? WHERE id = ?`).bind(nowIso(), rebindFrom).run();
+      }
       await db.prepare(`UPDATE users SET github_id = ?, email_verified = MAX(email_verified, 1), updated_at = ? WHERE id = ?`)
         .bind(String(ghUser.id), nowIso(), row.id).run();
-      await writeAuditLog(c, { action: 'user.oauth_link', actorId: row.id, targetType: 'user', targetId: row.id, detail: 'github' });
+      if (rebindFrom) {
+        await writeAuditLog(c, { action: 'user.oauth_rebind', actorId: row.id, targetType: 'user', targetId: row.id, detail: `github:from:${rebindFrom}` });
+      } else if (!owner) {
+        await writeAuditLog(c, { action: 'user.oauth_link', actorId: row.id, targetType: 'user', targetId: row.id, detail: 'github' });
+      }
     }
+  }
+
+  if (!row) {
+    row = await db
+      .prepare(`SELECT id, uid, username_raw, nickname, role, status, email, email_verified FROM users WHERE github_id = ? LIMIT 1`)
+      .bind(String(ghUser.id))
+      .first<UserRow>();
   }
 
   if (row && row.status !== 'active') {
