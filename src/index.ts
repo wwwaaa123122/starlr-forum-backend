@@ -25,6 +25,7 @@ import { uploadRoutes, fileRoutes } from './routes/upload';
 import adminRoutes from './routes/admin';
 import wellKnownRoutes from './routes/well-known';
 import oauthRoutes from './routes/oauth';
+import githubOauthRoutes from './routes/oauth-github';
 
 const app = new Hono<AppEnv>();
 
@@ -61,6 +62,7 @@ app.use('/api/*', optionalAuth);
 
 // ---------- 路由 ----------
 app.route('/api/auth', authRoutes);
+app.route('/api/auth/oauth', githubOauthRoutes); // POST /exchange（GitHub 登录一次性码兑换）
 app.route('/api/categories', categoryRoutes);
 app.route('/api/posts', postRoutes);
 app.route('/api/replies', replyRoutes);
@@ -73,6 +75,7 @@ app.route('/api', fileRoutes); // GET /api/files/*（R2 图片）、GET /api/ava
 app.route('/api/admin', adminRoutes);
 app.route('/.well-known', wellKnownRoutes);
 app.route('/oauth', oauthRoutes);
+app.route('/oauth', githubOauthRoutes); // GET /github/start、/github/callback
 
 // 当前用户资料
 app.route('/api/me', meRoutes);
