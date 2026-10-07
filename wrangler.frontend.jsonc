@@ -10,7 +10,9 @@
   "compatibility_date": "2025-10-01",
   "assets": {
     "directory": "../frontend-x/dist-f",
-    "not_found_handling": "single-page-application"
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/robots.txt", "/sitemap.xml", "/feed.xml"]
   },
   "observability": {
     "enabled": true
