@@ -59,6 +59,20 @@ export const SERVICES: ServiceDef[] = [
     testable: true,
   },
   {
+    key: 'seo',
+    kvKey: 'config:seo',
+    label: 'SEO / 搜索引擎',
+    description: 'canonical 主域（唯一对外收录域名）、站长平台验证码、百度主动推送 token。留空即用默认主域 forum.182030.xyz。',
+    fields: [
+      { name: 'canonical_host', label: 'canonical 主域', placeholder: 'forum.182030.xyz', hint: '不带协议；x / f 域页面 canonical 与 sitemap 都归并到这里' },
+      { name: 'baidu_verify', label: '百度站长验证码', placeholder: 'code-xxxx', hint: 'baidu-site-verification 的 content 值' },
+      { name: 'google_verify', label: 'Google Search Console', placeholder: 'xxxx', hint: 'google-site-verification 的 content 值' },
+      { name: 'bing_verify', label: 'Bing 站长验证', placeholder: 'xxxx', hint: 'msvalidate.01 的 content 值' },
+      { name: 'baidu_push_token', label: '百度主动推送 token', secret: true, placeholder: '...', hint: '填后每次发帖自动推送 URL（实时收录）' },
+    ],
+    testable: true,
+  },
+  {
     key: 'oauth-github',
     kvKey: 'config:oauth:github',
     label: 'GitHub OAuth 登录',

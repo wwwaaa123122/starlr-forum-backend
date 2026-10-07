@@ -99,6 +99,27 @@ app.post('/:key/test', async (c) => {
     return ok(c, await s3Test(c.env));
   }
 
+  if (key === 'seo') {
+    const { getSeoConfig, canonicalUrl } = await import('../lib/seo');
+    const cfg = await getSeoConfig(c.env);
+    if (!/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(cfg.canonical_host)) {
+      return ok(c, { ok: false, message: `canonical 主域格式不正确：${cfg.canonical_host}` });
+    }
+    let reachable = false;
+    let detail = '';
+    try {
+      const res = await fetch(`https://${cfg.canonical_host}/robots.txt`, { headers: { 'User-Agent': 'StarlrSEO/1.0' } });
+      reachable = res.ok;
+      detail = `robots.txt → HTTP ${res.status}`;
+    } catch (e) {
+      detail = `抓取失败：${e instanceof Error ? e.message : String(e)}`;
+    }
+    return ok(c, {
+      ok: reachable,
+      message: `${reachable ? '主域可访问' : '主域不可访问'}（${cfg.canonical_host}，${detail}）｜sitemap：${canonicalUrl(cfg, '/sitemap.xml')}｜百度推送：${cfg.baidu_push_token ? '已配置' : '未配置'}`,
+    });
+  }
+
   if (key === 'oauth-github') {
     const cfg = await getGithubConfig(c.env, 'github');
     if (!cfg) return ok(c, { ok: false, message: '尚未配置 client_id / client_secret' });

@@ -22,6 +22,7 @@ import userRoutes from './routes/users';
 import notificationRoutes from './routes/notifications';
 import reportRoutes from './routes/reports';
 import { uploadRoutes, fileRoutes } from './routes/upload';
+import seoRoutes from './routes/seo';
 import adminRoutes from './routes/admin';
 import adminServiceRoutes from './routes/admin-services';
 import wellKnownRoutes from './routes/well-known';
@@ -62,6 +63,7 @@ app.use('/api/*', async (c, next) => {
 app.use('/api/*', optionalAuth);
 
 // ---------- 路由 ----------
+app.route('/', seoRoutes); // robots/sitemap/feed + 爬虫动态渲染（真人转发 ASSETS）
 app.route('/api/auth', authRoutes);
 app.route('/api/auth/oauth', githubOauthRoutes); // POST /exchange（GitHub 登录一次性码兑换）
 app.route('/api/categories', categoryRoutes);

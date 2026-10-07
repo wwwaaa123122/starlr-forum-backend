@@ -165,6 +165,14 @@ app.post('/', requireAuth, requireVerified, async (c) => {
   // @ 提及通知（限制单帖最多 5 个）
   await notifyMentions(c.env, body.content, { actorId: user.id, postId });
 
+  // SEO：百度主动推送新帖 URL（未配置 token 时静默跳过，不阻塞发帖）
+  c.executionCtx.waitUntil(
+    (async () => {
+      const { pushPostUrl } = await import('../lib/seo-push');
+      await pushPostUrl(c.env, postId);
+    })().catch(() => undefined),
+  );
+
   return ok(c, { id: postId }, { status: 201 });
 });
 

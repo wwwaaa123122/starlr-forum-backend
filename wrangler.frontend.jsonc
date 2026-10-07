@@ -4,6 +4,7 @@
 // 无任何 D1/KV/R2 绑定、无后端代码；浏览器跨域直连独立后端 forum-backend（i.182030.xyz）。
 {
   "$schema": "node_modules/wrangler/config-schema.json",
+  "main": "src/index-f.ts",
   "name": "forum-frontend",
   "routes": [{ "pattern": "f.182030.xyz", "custom_domain": true }],
   "compatibility_date": "2025-10-01",
