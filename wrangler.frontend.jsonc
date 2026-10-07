@@ -1,7 +1,9 @@
 // 星辰旅人论坛 — 纯前端 Worker（f.182030.xyz）
 //
-// 只托管静态资源（frontend-x 构建产物 dist-f，构建时 VITE_API_BASE=https://i.182030.xyz），
-// 无任何 D1/KV/R2 绑定、无后端代码；浏览器跨域直连独立后端 forum-backend（i.182030.xyz）。
+// 托管静态资源（frontend-x 构建产物 dist-f，构建时 VITE_API_BASE=https://i.182030.xyz），
+// 无任何 D1/KV/R2 数据绑定；浏览器跨域直连独立后端 forum-backend（i.182030.xyz）。
+// src/index-f.ts 是薄 SEO 入口：仅 /robots.txt、/sitemap.xml、/feed.xml 进 Worker（run_worker_first 白名单），
+// 其余路径由 assets 层直出（SPA fallback 照旧）。
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "main": "src/index-f.ts",

@@ -100,3 +100,13 @@ npx wrangler secret put RESEND_API_KEY      --name forum-backend          # 尚�
 - **凭据一律存 KV**（不放 wrangler vars/secrets，改配置无需重新部署）：`config:mail`（Resend 邮件）、`config:s3`（S3 兼容存储）、`config:oauth:github`（GitHub OAuth 登录）。
 - 管理后台「服务配置」页（/admin/services，仅 admin）可视化维护：掩码回显、来源标注（后台/环境）、连通测试、清空回退。
 - 邮件发送读取顺序：KV `config:mail` → env（RESEND_API_KEY / MAIL_FROM）兜底；生产当前无 env 兜底，填了后台配置邮件即通。
+
+## SEO 层（2026-10-07 起）
+
+- **唯一收录主域 = `forum.182030.xyz`**（可用 KV `config:seo.canonical_host` 改，无需改代码）。x / f 域页面 canonical 一律归并到主域，不做用户可见 301。
+- **爬虫动态渲染**：`backend/src/routes/seo.ts` 对搜索引擎/社交爬虫 UA 直接输出真实正文 HTML（h1/正文/回复/JSON-LD），真人继续走 SPA。新增爬虫或页面类型都在此文件扩展。
+- **SEO 路径必须进 Worker**：`wrangler.x.jsonc` 的 `assets.run_worker_first` 已含页面路径 + `/robots.txt` `/sitemap.xml` `/feed.xml`；**新增 SEO 页面路由时同步加进去**，否则会被静态资源层截胡。
+- 爬虫兜底走 `index.ts` 的 `notFound`（`seoFallback`）——**不要在 seo.ts 里写 `app.get('*')` 通配**，它会吞掉后挂载的 `/api/*` 路由（曾出过该事故）。
+- f 站（`forum-frontend`）已从"纯 assets 无绑定"升级为薄 Worker（`src/index-f.ts`）：仅 robots/sitemap/feed 三个路径进 Worker（`run_worker_first` 白名单），其余保持 assets 直出；**零 D1/KV 绑定**不变。
+- 站内 SEO 配置在管理后台「服务配置 → SEO / 搜索引擎」：canonical 主域、百度/Google/Bing 站长验证码、百度主动推送 token（填后发帖自动推送）。
+- 方案全文见 `docs/SEO方案.md`。
