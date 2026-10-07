@@ -51,7 +51,7 @@ function deviceInfoFrom(c: Parameters<typeof sessionInfoFrom>[0]): string {
   return sessionInfoFrom(c);
 }
 
-function publicUser(user: Record<string, unknown>) {
+export function publicUser(user: Record<string, unknown>) {
   return {
     id: user.id,
     uid: user.uid ?? null,
@@ -64,6 +64,7 @@ function publicUser(user: Record<string, unknown>) {
     likesPublic: (user.likes_public ?? 0) === 1,
     /** 主页背景图 */
     backgroundUrl: user.background_url ?? null,
+    hasGithub: Boolean(user.github_id),
     postCount: user.post_count ?? 0,
     replyCount: user.reply_count ?? 0,
     createdAt: user.created_at,
@@ -281,7 +282,7 @@ app.get('/me', requireAuth, async (c) => {
   const user = c.get('user')!;
   const profile = await c.env.DB.prepare(
     `SELECT id, username_raw AS username, nickname, email, avatar_url, bio, role, post_count, reply_count, created_at,
-            likes_public, background_url, email_verified, status
+            likes_public, background_url, email_verified, status, github_id
      FROM users WHERE id = ?`,
   )
     .bind(user.id)

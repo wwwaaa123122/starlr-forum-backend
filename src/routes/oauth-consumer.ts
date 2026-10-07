@@ -24,6 +24,9 @@ import { errors, ok } from '../lib/http';
 import { issueTokens } from '../lib/tokens';
 import { newId, randomToken, nowIso } from '../lib/ids';
 import { sessionInfoFrom } from '../lib/session-info';
+import { requireAuth } from '../middleware/auth';
+import { verifyPassword } from '../lib/password';
+import { publicUser } from './auth';
 import { clientFingerprint, consumeRateLimit, RATE_LIMITS } from '../lib/rate-limit';
 import { writeAuditLog } from '../lib/audit';
 import { hashPassword } from '../lib/password';
@@ -105,8 +108,17 @@ app.get('/start/:provider', async (c) => {
   if (!cfg) return page(c, `${provider} 登录未配置`, `管理员尚未完成 ${provider} OAuth 配置（KV: config:oauth:${provider}）。`, 503);
 
   const redirect = safeRedirect(c.req.query('redirect'), c.env);
+  // 绑定意图：已登录用户发起绑定（bind-intent 端点签发的一次性 token）
+  let bindUid: string | null = null;
+  const bindToken = c.req.query('bind');
+  if (bindToken) {
+    const raw = await c.env.CACHE.get(`oauth:gh:bind:${bindToken}`);
+    if (!raw) return page(c, '绑定会话已过期', '请回到设置页重新点击「绑定 GitHub」。', 400);
+    await c.env.CACHE.delete(`oauth:gh:bind:${bindToken}`);
+    bindUid = (JSON.parse(raw) as { uid: string }).uid;
+  }
   const state = randomToken(18);
-  await c.env.CACHE.put(`oauth:gh:state:${state}`, JSON.stringify({ redirect }), { expirationTtl: STATE_TTL });
+  await c.env.CACHE.put(`oauth:gh:state:${state}`, JSON.stringify({ redirect, bindUid }), { expirationTtl: STATE_TTL });
 
   const authorize = new URL('https://github.com/login/oauth/authorize');
   authorize.searchParams.set('client_id', cfg.client_id);
@@ -131,7 +143,7 @@ app.get('/callback/:provider', async (c) => {
   const stateRaw = state ? await c.env.CACHE.get(`oauth:gh:state:${state}`) : null;
   if (stateRaw) await c.env.CACHE.delete(`oauth:gh:state:${state}`);
   if (!stateRaw) return page(c, '登录状态已失效', '授权会话已过期或不存在，请回到登录页重新点击「使用 GitHub 登录」。', 400);
-  const { redirect } = JSON.parse(stateRaw) as { redirect: string };
+  const { redirect, bindUid } = JSON.parse(stateRaw) as { redirect: string; bindUid?: string | null };
 
   const ghCode = c.req.query('code') ?? '';
   if (!ghCode) return page(c, '授权失败', 'GitHub 未返回授权码，请重试。', 400);
@@ -167,11 +179,40 @@ app.get('/callback/:provider', async (c) => {
     verifiedEmail = emails.find((e) => e.primary && e.verified)?.email ?? emails.find((e) => e.verified)?.email ?? null;
   }
 
+  // 2.5) 绑定模式：把该 GitHub 账号绑到「当前登录账号」上（不影响其他账号匹配逻辑）
+  const db = c.env.DB;
+  if (bindUid) {
+    const bindUser = await db
+      .prepare(`SELECT id, uid, username_raw, status, email, email_verified FROM users WHERE id = ?`)
+      .bind(bindUid)
+      .first<{ id: string; uid: number; username_raw: string; status: string; email: string; email_verified: number }>();
+    if (!bindUser || bindUser.status !== 'active') return page(c, '无法绑定', '当前账号状态异常，无法完成绑定。', 403);
+
+    const ghOwner = await db.prepare(`SELECT id, username_raw FROM users WHERE github_id = ? LIMIT 1`)
+      .bind(String(ghUser.id)).first<{ id: string; username_raw: string }>();
+    if (ghOwner && ghOwner.id !== bindUser.id) {
+      return page(c, '无法绑定', `该 GitHub 账号已绑定到论坛账号「${ghOwner.username_raw}」，请先在那边解绑后再试。`, 409);
+    }
+    if (verifiedEmail && verifiedEmail.toLowerCase() !== bindUser.email.toLowerCase()) {
+      const emailOwner = await db.prepare(`SELECT id, username_raw FROM users WHERE email = ? LIMIT 1`)
+        .bind(verifiedEmail.toLowerCase()).first<{ id: string; username_raw: string }>();
+      if (emailOwner && emailOwner.id !== bindUser.id) {
+        return page(c, '无法绑定', `GitHub 已验证邮箱（${verifiedEmail}）已被论坛账号「${emailOwner.username_raw}」使用，请先修改其中一方的邮箱。`, 409);
+      }
+    }
+    await db.prepare(`UPDATE users SET github_id = ?, email_verified = CASE WHEN ? THEN 1 ELSE email_verified END, updated_at = ? WHERE id = ?`)
+      .bind(String(ghUser.id), verifiedEmail && verifiedEmail.toLowerCase() === bindUser.email.toLowerCase() ? 1 : 0, nowIso(), bindUser.id).run();
+    await writeAuditLog(c, { action: 'user.oauth_bind', actorId: bindUser.id, targetType: 'user', targetId: bindUser.id, detail: 'github' });
+    const code = randomToken(24);
+    await c.env.CACHE.put(`oauth:gh:code:${code}`, JSON.stringify({ userId: bindUser.id }), { expirationTtl: CODE_TTL });
+    return c.redirect(`${redirect}/auth/github/done?code=${encodeURIComponent(code)}&next=/settings`, 302);
+  }
+
   // 3) 找到 / 建立论坛账号 —— **邮箱优先**：
   //    ① GitHub 已验证邮箱命中论坛账号 → 绑定到该账号并登录（github_id 若已绑在别的账号上，迁移过来）
   //    ② 否则 github_id 精确匹配
   //    ③ 都没有 → 新建
-  const db = c.env.DB;
+  // （db 已在上方声明）
   type UserRow = { id: string; uid: number; username_raw: string; nickname: string; role: string; status: string; email: string; email_verified: number };
   let row: UserRow | null = null;
   let rebindFrom: string | null = null;
@@ -333,6 +374,39 @@ app.post('/exchange', async (c) => {
     ...tokens,
     tokenType: 'Bearer',
   });
+});
+
+/** POST /api/auth/oauth/github/unbind — 解绑 GitHub（需密码验证，防止被盗号解绑后无法找回） */
+app.post('/github/unbind', requireAuth, async (c) => {
+  const uid = c.get('user')!.id;
+  const body = (await c.req.json().catch(() => ({}))) as { password?: string };
+  if (!body.password) throw errors.badRequest('请输入密码以确认解绑', 'PASSWORD_REQUIRED');
+
+  const row = await c.env.DB.prepare(`SELECT id, github_id, password_hash FROM users WHERE id = ?`).bind(uid)
+    .first<{ id: string; github_id: string | null; password_hash: string }>();
+  if (!row) throw errors.notFound('账号不存在');
+  if (!row.github_id) throw errors.badRequest('当前账号未绑定 GitHub', 'GITHUB_NOT_BOUND');
+  if (!(await verifyPassword(body.password, row.password_hash))) {
+    throw errors.badRequest('密码不正确', 'WRONG_PASSWORD');
+  }
+
+  await c.env.DB.prepare(`UPDATE users SET github_id = NULL, updated_at = ? WHERE id = ?`).bind(nowIso(), uid).run();
+  await writeAuditLog(c, { action: 'user.oauth_unbind', actorId: uid, targetType: 'user', targetId: uid, detail: 'github' });
+
+  const fresh = await c.env.DB.prepare(
+    `SELECT id, uid, username_raw AS username, nickname, email, avatar_url, bio, role, status, email_verified,
+            post_count, reply_count, last_login_at, created_at, likes_public, background_url, github_id
+     FROM users WHERE id = ?`,
+  ).bind(uid).first();
+  return ok(c, { success: true, user: { ...publicUser(fresh ?? {}), email: fresh?.email } });
+});
+
+/** POST /api/auth/oauth/bind-intent — 已登录用户发起绑定，返回一次性 bind token（10 分钟） */
+app.post('/bind-intent', requireAuth, async (c) => {
+  const uid = c.get('user')!.id;
+  const bindToken = randomToken(18);
+  await c.env.CACHE.put(`oauth:gh:bind:${bindToken}`, JSON.stringify({ uid }), { expirationTtl: STATE_TTL });
+  return ok(c, { bindToken, expiresIn: STATE_TTL });
 });
 
 export default app;

@@ -26,7 +26,7 @@ app.get('/', async (c) => {
   const user = c.get('user')!;
   const profile = await c.env.DB.prepare(
     `SELECT id, uid, username_raw AS username, nickname, email, avatar_url, bio, role, status, email_verified,
-            post_count, reply_count, last_login_at, created_at, likes_public, background_url
+            post_count, reply_count, last_login_at, created_at, likes_public, background_url, github_id
      FROM users WHERE id = ?`,
   )
     .bind(user.id)
@@ -53,6 +53,8 @@ app.get('/', async (c) => {
       likesPublic: (profile.likes_public ?? 0) === 1,
       /** 主页背景图 */
       backgroundUrl: profile.background_url ?? null,
+      /** 是否已绑定 GitHub */
+      hasGithub: Boolean(profile.github_id),
     },
   });
 });
@@ -106,7 +108,7 @@ app.patch('/', async (c) => {
 
   const fresh = await c.env.DB.prepare(
     `SELECT id, uid, username_raw AS username, nickname, email, avatar_url, bio, role, status, email_verified,
-            post_count, reply_count, last_login_at, created_at, likes_public, background_url
+            post_count, reply_count, last_login_at, created_at, likes_public, background_url, github_id
      FROM users WHERE id = ?`,
   )
     .bind(user.id)
@@ -133,6 +135,7 @@ app.patch('/', async (c) => {
           createdAt: fresh.created_at,
           likesPublic: (fresh.likes_public ?? 0) === 1,
           backgroundUrl: fresh.background_url ?? null,
+          hasGithub: Boolean(fresh.github_id),
         }
       : undefined,
   });
