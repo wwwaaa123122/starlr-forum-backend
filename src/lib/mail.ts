@@ -81,47 +81,87 @@ export interface MailDeliveryResult {
   message: string;
 }
 
-/** Resend 投递：KV config:mail 优先，env（RESEND_API_KEY / MAIL_FROM）兜底 */
-export async function deliverViaResend(env: Env, recipients: string[], subject: string, html: string, text: string): Promise<MailDeliveryResult> {
-  let apiKey = env.RESEND_API_KEY;
-  let from = env.MAIL_FROM || '星辰旅人论坛 <no-reply@182030.xyz>';
-  let source = 'env';
+export interface MailAccount {
+  api_key: string;
+  from: string;
+  /** 来源标注：kv（管理后台配置）或 env（wrangler secret 兜底） */
+  source: 'kv' | 'env';
+}
+
+/**
+ * 发件账号池：KV config:mail.accounts（多账号）+ env secret 兜底账号。
+ * 账号 A 的 RESEND_API_KEY 是 secret 不可读，因此始终作为池成员追加，不进 KV。
+ */
+export async function getMailAccounts(env: Env): Promise<MailAccount[]> {
+  const list: MailAccount[] = [];
   try {
     const raw = await env.CACHE.get('config:mail');
     if (raw) {
-      const cfg = JSON.parse(raw) as { api_key?: string; from?: string };
-      if (cfg.api_key) {
-        apiKey = cfg.api_key;
-        source = 'kv';
+      const cfg = JSON.parse(raw) as { accounts?: { api_key?: string; from?: string }[]; api_key?: string; from?: string };
+      // 新结构：accounts 数组
+      for (const a of cfg.accounts ?? []) {
+        if (a.api_key && a.api_key !== '-') list.push({ api_key: a.api_key, from: a.from || env.MAIL_FROM || '星辰旅人论坛 <no-reply@182030.xyz>', source: 'kv' });
       }
-      if (cfg.from) from = cfg.from;
+      // 旧单账号结构兼容
+      if (!cfg.accounts && cfg.api_key) list.push({ api_key: cfg.api_key, from: cfg.from || env.MAIL_FROM || '星辰旅人论坛 <no-reply@182030.xyz>', source: 'kv' });
     }
   } catch {
-    // KV 异常时用 env 兜底
+    /* KV 异常时用 env 兜底 */
   }
-
-  if (!apiKey) {
-    console.warn('[mail] Resend 未配置（KV 与 env 均无 API Key），跳过发送:', subject);
-    return { ok: false, message: 'Resend 未配置：请在管理后台「服务配置 → 邮件」填写 API Key' };
+  if (env.RESEND_API_KEY) {
+    list.push({ api_key: env.RESEND_API_KEY, from: env.MAIL_FROM || '星辰旅人论坛 <no-reply@182030.xyz>', source: 'env' });
   }
+  return list;
+}
 
+export interface MailDeliveryResult {
+  ok: boolean;
+  message: string;
+}
+
+async function sendOne(acc: MailAccount, recipients: string[], subject: string, html: string, text: string): Promise<{ ok: boolean; message: string }> {
   try {
     const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from, to: recipients, subject, html, text }),
+      headers: { Authorization: `Bearer ${acc.api_key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from: acc.from, to: recipients, subject, html, text }),
     });
     if (!res.ok) {
       const err = (await res.json().catch(() => ({}))) as ResendError;
-      const msg = err.message ?? 'unknown';
-      console.error(`[mail] Resend 发送失败 ${res.status}:`, msg);
-      return { ok: false, message: `Resend HTTP ${res.status}: ${msg}` };
+      return { ok: false, message: `HTTP ${res.status}: ${err.message ?? 'unknown'}` };
     }
-    return { ok: true, message: `发送成功｜From: ${from}｜配置来源：${source === 'kv' ? '管理后台' : '环境变量'}` };
+    return { ok: true, message: 'OK' };
   } catch (e) {
-    console.error('[mail] Resend 请求异常:', e instanceof Error ? e.message : e);
     return { ok: false, message: `请求异常：${e instanceof Error ? e.message : String(e)}` };
   }
+}
+
+/**
+ * Resend 轮询投递：按秒级时间片在账号池中轮转（分摊限额），当前账号失败自动顺移到下一个。
+ * 全部失败时返回最后一个错误；账号池为空返回配置提示。
+ */
+export async function deliverViaResend(env: Env, recipients: string[], subject: string, html: string, text: string): Promise<MailDeliveryResult> {
+  const accounts = await getMailAccounts(env);
+  if (accounts.length === 0) {
+    console.warn('[mail] Resend 未配置（KV 与 env 均无账号），跳过发送:', subject);
+    return { ok: false, message: 'Resend 未配置：请在管理后台「服务配置 → 邮件」添加发件账号' };
+  }
+
+  // 轮询起点：秒级时间片取模（发信低频，秒级轮转即近似均匀分摊）
+  const start = Math.floor(Date.now() / 1000) % accounts.length;
+  let lastError = '';
+  for (let i = 0; i < accounts.length; i++) {
+    const idx = (start + i) % accounts.length;
+    const acc = accounts[idx];
+    const r = await sendOne(acc, recipients, subject, html, text);
+    if (r.ok) {
+      console.log(`[mail] 发送成功 via 账号#${idx + 1}(${acc.source}) From=${acc.from}`);
+      return { ok: true, message: `发送成功｜账号 #${idx + 1}（${acc.source === 'kv' ? '管理后台' : '环境变量'}）｜From: ${acc.from}` };
+    }
+    lastError = `账号 #${idx + 1}: ${r.message}`;
+    console.error(`[mail] 账号#${idx + 1} 发送失败，尝试下一个:`, r.message);
+  }
+  return { ok: false, message: `全部 ${accounts.length} 个发件账号失败（最后一个：${lastError}）` };
 }
 
 /**

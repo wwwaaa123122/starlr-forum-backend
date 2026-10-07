@@ -22,13 +22,38 @@ app.use('*', requireRole('admin'));
 /** GET / — 所有服务：schema + 当前有效值（secret 掩码）+ 来源 */
 app.get('/', async (c) => {
   const services = [];
-  for (const def of SERVICES) services.push(await describeService(c.env, def));
+  for (const def of SERVICES) {
+    const view = await describeService(c.env, def);
+    if (def.key === 'mail') {
+      // 邮件：账号池视图（api_key 掩码；env 兜底账号只读展示）
+      const { getMailAccounts } = await import('../lib/mail');
+      const accs = await getMailAccounts(c.env);
+      view.accounts = accs.map((a) => ({
+        from: a.from,
+        source: a.source,
+        api_key_masked: a.source === 'env' ? '(环境变量 secret，不可见)' : `••••••••${a.api_key.slice(-4)}`,
+      }));
+      view.fields = []; // 邮件不再使用平铺字段
+      view.configured = accs.length > 0;
+    }
+    services.push(view);
+  }
   return ok(c, { services });
 });
 
 const saveSchema = z.object({
   /** 字段名 → 值；secret 字段传空串表示保持不变，传 '-' 表示清除 */
-  values: z.record(z.string(), z.string().max(2000)),
+  values: z.record(z.string(), z.string().max(2000)).optional(),
+  /** mail 服务专用：发件账号池全量保存（api_key 空串 = 保持原值） */
+  accounts: z
+    .array(
+      z.object({
+        api_key: z.string().max(300),
+        from: z.string().max(200).regex(/<[^>]+@[^>]+>/, 'from 需形如 显示名 <邮箱@域名>'),
+      }),
+    )
+    .max(10)
+    .optional(),
 });
 
 /** PUT /:key — 保存配置 */
@@ -37,7 +62,29 @@ app.put('/:key', async (c) => {
   const def = serviceDef(key);
   if (!def) throw errors.notFound('未知服务');
 
-  const { values } = await parseJson(c, saveSchema);
+  const { values, accounts } = await parseJson(c, saveSchema);
+
+  // mail 服务：账号池全量保存
+  if (key === 'mail') {
+    if (!accounts) throw errors.badRequest('请提交 accounts 账号列表', 'ACCOUNTS_REQUIRED');
+    const { getMailAccounts } = await import('../lib/mail');
+    const currentRaw = await getServiceRaw(c.env, 'mail');
+    const current = ((currentRaw as unknown as { accounts?: { api_key?: string; from?: string }[] })?.accounts) ?? [];
+    const saved = accounts.map((a, i) => ({
+      api_key: a.api_key === '' ? (current[i]?.api_key ?? '') : a.api_key,
+      from: a.from.trim(),
+    })).filter((a) => a.api_key && a.api_key !== '-');
+    if (saved.length === 0) throw errors.badRequest('至少保留一个有效发件账号', 'ACCOUNTS_EMPTY');
+    await putServiceRaw(c.env, key, { accounts: saved } as unknown as Record<string, string>);
+    await writeAuditLog(c, { action: 'admin.service_config', actorId: c.get('user')!.id, targetType: 'service', targetId: key, detail: `accounts:${saved.length}` });
+    const view = await describeService(c.env, def);
+    const { getMailAccounts: getAcc } = await import('../lib/mail');
+    view.accounts = (await getAcc(c.env)).map((a) => ({ from: a.from, source: a.source, api_key_masked: a.source === 'env' ? '(环境变量 secret，不可见)' : `••••••••${a.api_key.slice(-4)}` }));
+    view.fields = [];
+    return ok(c, { success: true, service: view });
+  }
+
+  if (!values) throw errors.badRequest('缺少 values', 'VALUES_REQUIRED');
   const existing = (await getServiceRaw(c.env, key)) ?? {};
   const next: Record<string, string> = {};
   for (const f of def.fields) {

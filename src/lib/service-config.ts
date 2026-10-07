@@ -35,11 +35,8 @@ export const SERVICES: ServiceDef[] = [
     key: 'mail',
     kvKey: 'config:mail',
     label: '邮件（Resend）',
-    description: '注册验证、找回密码、管理告警邮件。API Key 来自 Resend 控制台；发件地址需在 Resend 验证域名。',
-    fields: [
-      { name: 'api_key', label: 'API Key', secret: true, envName: 'RESEND_API_KEY', placeholder: 're_...' },
-      { name: 'from', label: '发件地址', envName: 'MAIL_FROM', placeholder: '星辰旅人论坛 <no-reply@182030.xyz>', hint: '格式：名称 <邮箱@已验证域名>' },
-    ],
+    description: '注册验证、找回密码、管理告警邮件。支持多发件账号轮询（分摊限额），某账号失败自动切换到下一个；环境变量里的 RESEND_API_KEY 会作为兜底账号自动加入轮询池。',
+    fields: [],
     testable: true,
   },
   {
@@ -120,8 +117,20 @@ function mask(value: string): string {
   return `••••••••${value.slice(-4)}`;
 }
 
+export interface ServiceView {
+  key: string;
+  label: string;
+  description: string;
+  testable: boolean;
+  configured: boolean;
+  requiredMissing: boolean;
+  fields: { name: string; label: string; secret: boolean; hint: string | null; placeholder: string | null; value: string | null; source: string | null }[];
+  /** 邮件服务专用：账号池视图 */
+  accounts?: { from: string; source: string; api_key_masked: string }[];
+}
+
 /** 管理接口展示视图：secret 掩码 + 标注每字段的配置来源（kv / env / 无） */
-export async function describeService(env: Env, def: ServiceDef) {
+export async function describeService(env: Env, def: ServiceDef): Promise<ServiceView> {
   const kv = (await getServiceRaw(env, def.key)) ?? {};
   const fields = def.fields.map((f) => {
     const kvVal = kv[f.name];

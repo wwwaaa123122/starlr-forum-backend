@@ -117,3 +117,10 @@ npx wrangler secret put RESEND_API_KEY      --name forum-backend          # 尚�
 - 收到形如 `010601a...-<uuid>-000000@rsend.182030.xyz` 的地址**不是发件人**，而是 Resend 自动生成的**退信信封地址（Return-Path / MAIL FROM）**，用于接收 bounce；其 MX（`rsend.182030.xyz` → Amazon SES）与 SPF/DKIM 由 Resend 域名验证时配置，**不要试图改成 no-reply@**（会造成退信丢失且可能 SPF 不对齐）。
 - 邮件客户端里的「由 rsend.182030.xyz 代发」提示同理，是 From 域与信封域不同导致的，属正常。
 - 管理后台「服务配置 → 邮件 → 测试连通」会回显实际生效的 From 与配置来源，便于核对。
+
+### 邮件多账号轮询（2026-10-07 起）
+
+- 发件账号池：KV `config:mail.accounts`（`[{api_key, from}]`）+ env `RESEND_API_KEY`（secret 不可读，自动作为兜底成员追加，不进 KV）。
+- 轮询：秒级时间片取模分摊限额；当前账号发送失败（限速/余额/域名问题）自动顺移下一个，全部失败才报错并附最后错误。
+- 新账号的 From 域必须在对应 Resend 账号里验证（API `GET /domains` 可查）。
+- 管理后台「服务配置 → 邮件」可视化增删账号；api_key 留空 = 保持原值；env 兜底行只读展示。
