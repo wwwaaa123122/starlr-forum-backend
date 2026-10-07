@@ -94,3 +94,9 @@ npx wrangler secret put RESEND_API_KEY      --name forum-backend          # 尚�
 ## Git
 
 独立仓库 `github.com/wwwaaa123122/starlr-forum-backend`（main，**中文提交信息**，一行主题即可）。当前工作区可能有未提交改动——属于最近功能开发，改完相关文件顺手提交。
+
+## 第三方服务配置（2026-10-07 起）
+
+- **凭据一律存 KV**（不放 wrangler vars/secrets，改配置无需重新部署）：`config:mail`（Resend 邮件）、`config:s3`（S3 兼容存储）、`config:oauth:github`（GitHub OAuth 登录）。
+- 管理后台「服务配置」页（/admin/services，仅 admin）可视化维护：掩码回显、来源标注（后台/环境）、连通测试、清空回退。
+- 邮件发送读取顺序：KV `config:mail` → env（RESEND_API_KEY / MAIL_FROM）兜底；生产当前无 env 兜底，填了后台配置邮件即通。
