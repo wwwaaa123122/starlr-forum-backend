@@ -19,7 +19,7 @@ export { uploadRoutes, fileRoutes };
 const MAX_SIZE = 5 * 1024 * 1024; // 单文件最大 5MB
 const MAX_FILES_PER_USER = 300; // 每用户附件总量上限
 const DAILY_UPLOAD_QUOTA = 40; // 每用户每 24 小时上传次数上限（KV 计数）
-const ALLOWED_PURPOSES = new Set(['avatar', 'post', 'reply', 'category']);
+const ALLOWED_PURPOSES = new Set(['avatar', 'post', 'reply', 'category', 'background']);
 const ALLOWED: Record<string, { ext: string; magic: (b: Uint8Array) => boolean }> = {
   'image/jpeg': {
     ext: 'jpg',

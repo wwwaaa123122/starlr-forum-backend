@@ -102,7 +102,12 @@ app.notFound((c) => {
   if (c.req.path.startsWith('/api/') || c.req.path.startsWith('/oauth/')) {
     return c.json({ error: { code: 'NOT_FOUND', message: '接口不存在' } }, 404);
   }
-  // 非 API 路径交给静态资源层（SPA fallback → index.html）
+  // 非 API 路径交给静态资源层（SPA fallback → index.html）；
+  // 纯 API 部署（如 forum-backend，无 assets 绑定）：根路径与任何未定义页面一律空 404，
+  // 不返回任何 JSON/版本/接口线索，避免被扫描与逆向。
+  if (!c.env.ASSETS) {
+    return c.body(null, 404);
+  }
   return c.env.ASSETS.fetch(c.req.raw);
 });
 

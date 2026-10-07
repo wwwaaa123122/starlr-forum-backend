@@ -101,7 +101,7 @@ app.get('/', async (c) => {
             p.favorite_count AS favoriteCount, p.created_at AS createdAt, p.updated_at AS updatedAt,
             p.last_reply_at AS lastReplyAt,
             substr(p.content, 1, 200) AS excerpt,
-            u.id AS authorId, u.uid AS authorUid, u.username_raw AS authorName, u.avatar_url AS authorAvatar,
+            u.id AS authorId, u.uid AS authorUid, u.username_raw AS authorName, u.nickname AS authorNickname, u.avatar_url AS authorAvatar,
             c.id AS categoryId, c.name AS categoryName, c.slug AS categorySlug
      ${baseFrom}
      WHERE ${where.join(' AND ')}
@@ -181,7 +181,7 @@ app.get('/:id', optionalAuth, async (c) => {
             p.view_count AS viewCount, p.reply_count AS replyCount,
             p.like_count AS likeCount, p.favorite_count AS favoriteCount,
             p.created_at AS createdAt, p.updated_at AS updatedAt, p.last_reply_at AS lastReplyAt,
-            u.id AS authorId, u.uid AS authorUid, u.username_raw AS authorName, u.username AS authorUsername,
+            u.id AS authorId, u.uid AS authorUid, u.username_raw AS authorName, u.nickname AS authorNickname, u.username AS authorUsername,
             u.avatar_url AS authorAvatar, u.role AS authorRole,
             c.id AS categoryId, c.name AS categoryName, c.slug AS categorySlug
      FROM posts p JOIN users u ON u.id = p.author_id JOIN categories c ON c.id = p.category_id
@@ -479,7 +479,7 @@ app.get('/:id/replies', async (c) => {
     `SELECT r.id, r.content, r.parent_id AS parentReplyId, r.reply_to_user_id AS replyToUserId,
             r.like_count AS likeCount, r.created_at AS createdAt, r.updated_at AS updatedAt,
             r.edited_at AS editedAt,
-            u.id AS authorId, u.uid AS authorUid, u.username_raw AS authorName, u.avatar_url AS authorAvatar, u.role AS authorRole,
+            u.id AS authorId, u.uid AS authorUid, u.username_raw AS authorName, u.nickname AS authorNickname, u.avatar_url AS authorAvatar, u.role AS authorRole,
             ru.username_raw AS replyToUserName,
             ${likedExpr}
      FROM replies r

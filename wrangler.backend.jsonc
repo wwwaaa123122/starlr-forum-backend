@@ -1,0 +1,52 @@
+// 星辰旅人论坛 — 独立后端 API Worker（i.182030.xyz）
+// 纯 API（不含静态资源）：供外部客户端 / App 直连。
+// 网页端（x.182030.xyz / forum.182030.xyz）由 xingchen-forum-x 自带同源 API，互不影响。
+// 注意：本 Worker 与 xingchen-forum-x 共享同一套 D1/KV/R2 数据，但 JWT 签名密钥各自独立。
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "forum-backend",
+  "main": "src/index.ts",
+  "routes": [{ "pattern": "i.182030.xyz", "custom_domain": true }],
+  "compatibility_date": "2025-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "xingchen-forum-db",
+      "database_id": "644b5c0c-ab78-4984-93dc-2f2978096add"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "CACHE",
+      "id": "10623b6e6ae9438299ff5b86a476333c"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "UPLOADS",
+      "bucket_name": "xingchen-forum-uploads"
+    }
+  ],
+  "observability": {
+    "enabled": true
+  },
+  "vars": {
+    // 站点标识，用于 JWT iss / OIDC issuer。生产部署后改成实际域名。
+    "SITE_URL": "https://i.182030.xyz",
+    "JWT_ISSUER": "https://i.182030.xyz",
+    "JWT_AUDIENCE": "api",
+    "ACCESS_TOKEN_TTL": "1800",
+    "REFRESH_TOKEN_TTL": "2592000",
+    "PASSWORD_ITERATIONS": "100000",
+    "TURNSTILE_SITE_KEY": "0x4AAAAAAFOSQFHmv_Mdvjrg",
+    "MAIL_FROM": "Starlr Forum <no-reply@182030.xyz>",
+    // 跨域前端白名单（逗号分隔）。f.182030.xyz = 纯前端 Worker，浏览器直连本 API。
+    "ALLOWED_ORIGINS": "https://f.182030.xyz"
+  },
+  // 生产密钥通过 wrangler secret put 设置（本 Worker 需单独配置）：
+  //   JWT_SIGNING_KEYS     : node scripts/generate-jwt-keys.mjs --print | wrangler secret put JWT_SIGNING_KEYS --name forum-backend
+  //   TURNSTILE_SECRET_KEY : Cloudflare Turnstile 服务端密钥
+  //   RESEND_API_KEY       : 邮件发送（未配置时仅跳过发信，不影响其它功能）
+  "placement": { "mode": "smart" }
+}

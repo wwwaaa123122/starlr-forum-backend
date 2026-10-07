@@ -133,7 +133,7 @@ starlr-forum-backend/
 node scripts/generate-jwt-keys.mjs
 
 # 生产：直接管道写入 Secret，私钥不落盘不打印
-node scripts/generate-jwt-keys.mjs --print | wrangler secret put JWT_SIGNING_KEYS   # 在本仓库内执行
+node scripts/generate-jwt-keys.mjs --print | wrangler secret put JWT_SIGNING_KEYS --name forum-backend   # 在本仓库内执行
 ```
 
 - **轮换流程：** 生成新密钥 → 数组中加入新条目（新 `active:true`，旧条目改 `active:false`）→ 更新 Secret。旧公钥保留在 JWKS 中，旧 Token 在旧 kid 下仍可验证，直到确认全部过期后再移除旧条目。
@@ -243,7 +243,10 @@ pnpm test             # 自动化测试（113 个用例）
 生产 Secret（首次部署或轮换时）：
 
 ```bash
-node scripts/generate-jwt-keys.mjs --print | wrangler secret put JWT_SIGNING_KEYS   # 在本仓库内执行
+# 2026-10-07 起生产架构（三个域名三个身份）：
+#   - x.182030.xyz / forum.182030.xyz  → xingchen-forum-x（网页 + 同源 API）  `wrangler deploy -c wrangler.x.jsonc`
+#   - i.182030.xyz                     → forum-backend（纯 API，无静态资源）  `wrangler deploy -c wrangler.backend.jsonc`
+#   - wrangler.jsonc 仅用于本地 `wrangler dev`，不含 routes，误 deploy 不会占用生产域名。
 wrangler secret put TURNSTILE_SECRET_KEY   # Turnstile widget secret
 ```
 

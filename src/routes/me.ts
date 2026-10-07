@@ -13,13 +13,20 @@ import { writeAuditLog } from '../lib/audit';
 
 const app = new Hono<AppEnv>();
 
+/** 站内资源（/api/files/... 等）或绝对 URL 均可 */
+const imageUrlSchema = z
+  .string()
+  .trim()
+  .max(500)
+  .refine((v) => v.startsWith('/') || /^https?:\/\//.test(v), '图片地址格式不正确');
+
 app.use('*', requireAuth);
 
 app.get('/', async (c) => {
   const user = c.get('user')!;
   const profile = await c.env.DB.prepare(
     `SELECT id, uid, username_raw AS username, nickname, email, avatar_url, bio, role, status, email_verified,
-            post_count, reply_count, last_login_at, created_at
+            post_count, reply_count, last_login_at, created_at, likes_public, background_url
      FROM users WHERE id = ?`,
   )
     .bind(user.id)
@@ -42,6 +49,10 @@ app.get('/', async (c) => {
       replyCount: profile.reply_count,
       lastLoginAt: profile.last_login_at,
       createdAt: profile.created_at,
+      /** 喜欢（点赞列表）是否公开 */
+      likesPublic: (profile.likes_public ?? 0) === 1,
+      /** 主页背景图 */
+      backgroundUrl: profile.background_url ?? null,
     },
   });
 });
@@ -49,7 +60,11 @@ app.get('/', async (c) => {
 const updateSchema = z.object({
   nickname: z.string().trim().min(1, '昵称不能为空').max(24, '昵称最多 24 个字符').optional(),
   bio: z.string().trim().max(200, '个性签名最多 200 字').optional(),
-  avatarUrl: z.string().trim().url('头像地址格式不正确').max(500).nullable().optional(),
+  avatarUrl: imageUrlSchema.nullable().optional(),
+  /** 喜欢（点赞列表）是否公开 */
+  likesPublic: z.boolean().optional(),
+  /** 主页背景图（/api/upload purpose=background；null = 移除） */
+  backgroundUrl: imageUrlSchema.nullable().optional(),
 });
 
 app.patch('/', async (c) => {
@@ -73,6 +88,14 @@ app.patch('/', async (c) => {
     sets.push('avatar_url = ?');
     values.push(body.avatarUrl);
   }
+  if (body.likesPublic !== undefined) {
+    sets.push('likes_public = ?');
+    values.push(body.likesPublic ? 1 : 0);
+  }
+  if (body.backgroundUrl !== undefined) {
+    sets.push('background_url = ?');
+    values.push(body.backgroundUrl);
+  }
   if (sets.length === 0) throw errors.badRequest('没有需要更新的字段');
   sets.push('updated_at = ?');
   values.push(nowIso(), user.id);
@@ -80,7 +103,39 @@ app.patch('/', async (c) => {
   await c.env.DB.prepare(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`)
     .bind(...values)
     .run();
-  return ok(c, { success: true });
+
+  const fresh = await c.env.DB.prepare(
+    `SELECT id, uid, username_raw AS username, nickname, email, avatar_url, bio, role, status, email_verified,
+            post_count, reply_count, last_login_at, created_at, likes_public, background_url
+     FROM users WHERE id = ?`,
+  )
+    .bind(user.id)
+    .first<Record<string, unknown>>();
+  return ok(c, {
+    success: true,
+    user: fresh
+      ? {
+          id: fresh.id,
+          uid: fresh.uid ?? null,
+          username: fresh.username,
+          nickname: fresh.nickname,
+          email: fresh.email,
+          avatarUrl: fresh.avatar_url,
+          bio: fresh.bio,
+          role: fresh.role,
+          status: fresh.status,
+          emailVerified: (fresh.email_verified ?? 1) === 1,
+          accountStatus:
+            fresh.status === 'banned' ? 'banned' : (fresh.email_verified ?? 1) === 1 ? 'active' : 'unverified',
+          postCount: fresh.post_count,
+          replyCount: fresh.reply_count,
+          lastLoginAt: fresh.last_login_at,
+          createdAt: fresh.created_at,
+          likesPublic: (fresh.likes_public ?? 0) === 1,
+          backgroundUrl: fresh.background_url ?? null,
+        }
+      : undefined,
+  });
 });
 
 /** 我收藏的帖子 */
@@ -97,7 +152,7 @@ app.get('/favorites', async (c) => {
     `SELECT p.id, p.title, substr(p.content, 1, 200) AS excerpt, p.view_count AS viewCount,
             p.reply_count AS replyCount, p.like_count AS likeCount, p.is_pinned AS isPinned, p.is_featured AS isFeatured,
             p.created_at AS createdAt, p.last_reply_at AS lastReplyAt, f.created_at AS favoritedAt,
-            u.username_raw AS authorName, u.id AS authorId, u.uid AS authorUid, u.avatar_url AS authorAvatar,
+            u.username_raw AS authorName, u.nickname AS authorNickname, u.id AS authorId, u.uid AS authorUid, u.avatar_url AS authorAvatar,
             c.name AS categoryName, c.slug AS categorySlug
      FROM favorites f
      JOIN posts p ON p.id = f.post_id AND p.is_deleted = 0
@@ -164,7 +219,7 @@ app.get('/likes', async (c) => {
     `SELECT p.id, p.title, substr(p.content, 1, 200) AS excerpt, p.view_count AS viewCount,
             p.reply_count AS replyCount, p.like_count AS likeCount, p.is_pinned AS isPinned, p.is_featured AS isFeatured,
             p.created_at AS createdAt, p.last_reply_at AS lastReplyAt, l.created_at AS likedAt,
-            u.username_raw AS authorName, u.id AS authorId, u.uid AS authorUid, u.avatar_url AS authorAvatar,
+            u.username_raw AS authorName, u.nickname AS authorNickname, u.id AS authorId, u.uid AS authorUid, u.avatar_url AS authorAvatar,
             c.name AS categoryName, c.slug AS categorySlug
      FROM likes l
      JOIN posts p ON p.id = l.target_id AND p.is_deleted = 0

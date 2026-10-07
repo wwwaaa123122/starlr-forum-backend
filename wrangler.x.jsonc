@@ -1,0 +1,56 @@
+// 星辰旅人论坛 — Starlr X 前端 Worker（x.182030.xyz）
+// 与主 Worker（i.182030.xyz，经典版前端）共享同一套 D1/KV/R2 数据与 API 代码，
+// 仅静态资源目录与站点域名不同。
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "xingchen-forum-x",
+  "main": "src/index.ts",
+  "routes": [
+    { "pattern": "x.182030.xyz", "custom_domain": true },
+    { "pattern": "forum.182030.xyz", "custom_domain": true }
+  ],
+  "compatibility_date": "2025-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "../frontend-x/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/oauth/*", "/.well-known/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "xingchen-forum-db",
+      "database_id": "644b5c0c-ab78-4984-93dc-2f2978096add"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "CACHE",
+      "id": "10623b6e6ae9438299ff5b86a476333c"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "UPLOADS",
+      "bucket_name": "xingchen-forum-uploads"
+    }
+  ],
+  "observability": {
+    "enabled": true
+  },
+  "vars": {
+    "SITE_URL": "https://x.182030.xyz",
+    "JWT_ISSUER": "https://x.182030.xyz",
+    "JWT_AUDIENCE": "api",
+    "ACCESS_TOKEN_TTL": "1800",
+    "REFRESH_TOKEN_TTL": "2592000",
+    "PASSWORD_ITERATIONS": "100000",
+    "TURNSTILE_SITE_KEY": "0x4AAAAAAFOSQFHmv_Mdvjrg",
+    "MAIL_FROM": "Starlr Forum <no-reply@182030.xyz>"
+  },
+  // 生产密钥（JWT_SIGNING_KEYS / TURNSTILE_SECRET_KEY）通过 wrangler secret put 注入：
+  //   node scripts/generate-jwt-keys.mjs --print | npx wrangler secret put JWT_SIGNING_KEYS -c wrangler.x.jsonc
+  //   npx wrangler secret put TURNSTILE_SECRET_KEY -c wrangler.x.jsonc
+  "placement": { "mode": "smart" }
+}

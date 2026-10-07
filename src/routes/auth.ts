@@ -60,6 +60,10 @@ function publicUser(user: Record<string, unknown>) {
     avatarUrl: user.avatar_url ?? null,
     bio: user.bio ?? '',
     role: user.role,
+    /** 喜欢（点赞列表）是否公开 */
+    likesPublic: (user.likes_public ?? 0) === 1,
+    /** 主页背景图 */
+    backgroundUrl: user.background_url ?? null,
     postCount: user.post_count ?? 0,
     replyCount: user.reply_count ?? 0,
     createdAt: user.created_at,
@@ -178,7 +182,7 @@ app.post('/login', async (c) => {
 
   const user = await c.env.DB.prepare(
     `SELECT id, username, username_raw, email, password_hash, nickname, avatar_url, bio, role, status,
-            post_count, reply_count, created_at
+            post_count, reply_count, created_at, likes_public, background_url, email_verified
      FROM users WHERE username = ? OR email = ? LIMIT 1`,
   )
     .bind(identifier, identifier)
@@ -276,7 +280,8 @@ app.post('/logout-all', requireAuth, async (c) => {
 app.get('/me', requireAuth, async (c) => {
   const user = c.get('user')!;
   const profile = await c.env.DB.prepare(
-    `SELECT id, username_raw AS username, nickname, email, avatar_url, bio, role, post_count, reply_count, created_at
+    `SELECT id, username_raw AS username, nickname, email, avatar_url, bio, role, post_count, reply_count, created_at,
+            likes_public, background_url, email_verified, status
      FROM users WHERE id = ?`,
   )
     .bind(user.id)

@@ -1,0 +1,17 @@
+// 星辰旅人论坛 — 纯前端 Worker（f.182030.xyz）
+//
+// 只托管静态资源（frontend-x 构建产物 dist-f，构建时 VITE_API_BASE=https://i.182030.xyz），
+// 无任何 D1/KV/R2 绑定、无后端代码；浏览器跨域直连独立后端 forum-backend（i.182030.xyz）。
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "forum-frontend",
+  "routes": [{ "pattern": "f.182030.xyz", "custom_domain": true }],
+  "compatibility_date": "2025-10-01",
+  "assets": {
+    "directory": "../frontend-x/dist-f",
+    "not_found_handling": "single-page-application"
+  },
+  "observability": {
+    "enabled": true
+  }
+}

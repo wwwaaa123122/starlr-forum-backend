@@ -145,7 +145,7 @@ app.get('/stats', async (c) => {
   // 浏览量排行（被删帖除外）
   const top = await c.env.DB.prepare(
     `SELECT p.id, p.title, p.view_count AS viewCount, p.reply_count AS replyCount,
-            p.like_count AS likeCount, p.created_at AS createdAt, u.username_raw AS authorName
+            p.like_count AS likeCount, p.created_at AS createdAt, u.username_raw AS authorName, u.nickname AS authorNickname
      FROM posts p JOIN users u ON u.id = p.author_id
      WHERE p.is_deleted = 0
      ORDER BY p.view_count DESC, p.created_at DESC
@@ -485,7 +485,7 @@ app.get('/posts', requireRole('moderator', 'admin'), async (c) => {
   const { results } = await c.env.DB.prepare(
     `SELECT p.id, p.title, p.is_deleted AS isDeleted, p.is_pinned AS isPinned, p.is_featured AS isFeatured,
             p.view_count AS viewCount, p.reply_count AS replyCount, p.created_at AS createdAt,
-            u.username_raw AS authorName, c.name AS categoryName
+            u.username_raw AS authorName, u.nickname AS authorNickname, c.name AS categoryName
      FROM posts p JOIN users u ON u.id = p.author_id JOIN categories c ON c.id = p.category_id
      ${whereSql} ORDER BY p.created_at DESC LIMIT ? OFFSET ?`,
   )
@@ -585,7 +585,7 @@ app.get('/replies', requireRole('moderator', 'admin'), async (c) => {
     .first<{ total: number }>();
   const { results } = await c.env.DB.prepare(
     `SELECT r.id, r.content, r.is_deleted AS isDeleted, r.created_at AS createdAt,
-            u.username_raw AS authorName, p.id AS postId, p.title AS postTitle
+            u.username_raw AS authorName, u.nickname AS authorNickname, p.id AS postId, p.title AS postTitle
      FROM replies r JOIN users u ON u.id = r.author_id JOIN posts p ON p.id = r.post_id
      ${scopeSql} ORDER BY r.created_at DESC LIMIT ? OFFSET ?`,
   )

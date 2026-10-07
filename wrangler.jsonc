@@ -1,10 +1,14 @@
-// 星辰旅人论坛 — Cloudflare Workers 配置
-// 静态资源来自 frontend/dist（前后端分离构建，单 Worker 承载 API + 静态站点）
+// 星辰旅人论坛 — 本地开发配置（wrangler dev 专用）
+//
+// ⚠️ 生产部署请勿使用本文件：
+//   - 网页端（前端 + 同源 API）：npx wrangler deploy -c wrangler.x.jsonc   → x/forum.182030.xyz
+//   - 独立后端 API：            npx wrangler deploy -c wrangler.backend.jsonc → i.182030.xyz
+// 本文件不含 routes，误执行 `wrangler deploy` 也只会发到 workers.dev，不会占用生产域名。
+// 经典版前端 Worker（原 i.182030.xyz 单 Worker 承载）已于 2026-10-07 删除。
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "xingchen-forum",
   "main": "src/index.ts",
-  "routes": [{ "pattern": "i.182030.xyz", "custom_domain": true }],
   "compatibility_date": "2025-10-01",
   "compatibility_flags": ["nodejs_compat"],
   "assets": {
