@@ -258,7 +258,7 @@ app.get('/callback/:provider', async (c) => {
   // 4) 一次性 code 入共享 KV（任意前端 Worker 可兑换）
   const code = randomToken(24);
   await c.env.CACHE.put(`oauth:gh:code:${code}`, JSON.stringify({ userId: row.id }), { expirationTtl: CODE_TTL });
-  return c.redirect(`${redirect}/oauth/github/done?code=${encodeURIComponent(code)}`, 302);
+  return c.redirect(`${redirect}/auth/github/done?code=${encodeURIComponent(code)}`, 302);
 });
 
 /** POST /api/auth/oauth/exchange — 前端用一次性 code 换本 Worker 签发的 token */
