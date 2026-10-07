@@ -22,7 +22,7 @@ import userRoutes from './routes/users';
 import notificationRoutes from './routes/notifications';
 import reportRoutes from './routes/reports';
 import { uploadRoutes, fileRoutes } from './routes/upload';
-import seoRoutes from './routes/seo';
+import seoRoutes, { seoFallback } from './routes/seo';
 import adminRoutes from './routes/admin';
 import adminServiceRoutes from './routes/admin-services';
 import wellKnownRoutes from './routes/well-known';
@@ -105,10 +105,13 @@ app.onError((err, c) => {
   return c.json({ error: { code: 'INTERNAL_ERROR', message: '服务器内部错误' } }, 500);
 });
 
-app.notFound((c) => {
+app.notFound(async (c) => {
   if (c.req.path.startsWith('/api/') || c.req.path.startsWith('/oauth/')) {
     return c.json({ error: { code: 'NOT_FOUND', message: '接口不存在' } }, 404);
   }
+  // 爬虫 UA 的未知 HTML 页面：渲染 noindex 提示页（真人继续走 SPA fallback）
+  const botPage = await seoFallback(c);
+  if (botPage) return botPage;
   // 非 API 路径交给静态资源层（SPA fallback → index.html）；
   // 纯 API 部署（如 forum-backend，无 assets 绑定）：根路径与任何未定义页面一律空 404，
   // 不返回任何 JSON/版本/接口线索，避免被扫描与逆向。

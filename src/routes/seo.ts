@@ -7,6 +7,7 @@
  * 覆盖到的 HTML 路径会先进本 Worker，非爬虫一律 ASSETS.fetch 透传。
  */
 import { Hono } from 'hono';
+import type { Context } from 'hono';
 import type { AppEnv } from '../types';
 import { getSeoConfig, canonicalUrl, siteRoot, renderPage, isCrawler } from '../lib/seo';
 import { renderMarkdown, plainText, escapeHtml } from '../lib/markdown';
@@ -344,20 +345,20 @@ app.get('/explore', async (c) => {
   );
 });
 
-// 其余 HTML 导航：真人走 SPA；爬虫一律 noindex 页（避免登录/设置等被收录）
-app.get('*', async (c) => {
-  if (!isCrawler(c)) return c.env.ASSETS.fetch(c.req.raw);
+/** 爬虫渲染兜底：由 index.ts 的 notFound 调用（显式页面路由未匹配时） */
+export async function seoFallback(c: Context<AppEnv>): Promise<Response | undefined> {
+  if (!isCrawler(c)) return undefined;
   const cfg = await getSeoConfig(c.env);
   return c.html(
     renderPage({
       mode: 'bot',
       host: c.req.header('host') ?? cfg.canonical_host,
       cfg,
-      meta: { title: `页面不存在 - ${SITE_NAME}`, description: SITE_TAGLINE, path: new URL(c.req.url).pathname, noindex: true },
+      meta: { title: `页面不存在 - ${SITE_NAME}`, description: SITE_TAGLINE, path: new URL(c.req.raw.url).pathname, noindex: true },
       bodyHtml: `<h1>404</h1><p><a href="${canonicalUrl(cfg, '/')}">返回${SITE_NAME}首页</a></p>`,
     }),
   );
-});
+}
 
 // 防止未使用 import 警告（newId 供未来 URL 短链用）
 void newId;
