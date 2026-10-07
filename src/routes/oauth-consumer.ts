@@ -2,12 +2,13 @@
  * /oauth/github/* — GitHub OAuth 登录（消费端）
  *
  * 设计要点：
- *  - 凭据存 KV：`config:oauth:github` = { client_id, client_secret, callback_origin? }
+ *  - 按 provider 参数化：/oauth/start/:provider、/oauth/callback/:provider
+ *    凭据存 KV：`config:oauth:<provider>` = { client_id, client_secret, callback_origin? }
  *    （不入 wrangler vars/secret，改配置无需重新部署；callback_origin 固定指向
  *      承载 GitHub OAuth App 回调的 Worker，默认 https://i.182030.xyz）
  *  - 单一 GitHub OAuth App 同时服务两个前端：
- *      1) 前端按钮 → {API_BASE}/oauth/github/start?redirect=<前端 origin>
- *      2) GitHub 回调 → callback_origin（i.182030.xyz）/oauth/github/callback
+ *      1) 前端按钮 → {API_BASE}/oauth/start/github?redirect=<前端 origin>
+ *      2) GitHub 回调 → callback_origin（i.182030.xyz）/oauth/callback/github
  *         建/联用户后生成一次性 code 存共享 KV（TTL 600s）
  *      3) 302 回 前端 /oauth/github/done?code=...，前端用 code 调
  *         POST /api/auth/oauth/exchange（本文件，挂载在 /api/auth/oauth）
@@ -32,7 +33,6 @@ function deviceInfoFrom(c: Context<AppEnv>): string {
   return sessionInfoFrom(c);
 }
 
-const CONFIG_KEY = 'config:oauth:github';
 const STATE_TTL = 600;
 const CODE_TTL = 600;
 
@@ -77,8 +77,8 @@ function page(c: Context<AppEnv>, title: string, message: string, status = 200) 
   return c.body(html, status as ContentfulStatusCode, { 'Content-Type': 'text/html; charset=utf-8' });
 }
 
-async function getConfig(env: AppEnv['Bindings']): Promise<GithubConfig | null> {
-  const raw = await env.CACHE.get(CONFIG_KEY);
+async function getConfig(env: AppEnv['Bindings'], provider: string): Promise<GithubConfig | null> {
+  const raw = await env.CACHE.get(`config:oauth:${provider}`);
   if (!raw) return null;
   try {
     const cfg = JSON.parse(raw) as GithubConfig;
@@ -96,9 +96,13 @@ function safeRedirect(origin: string | undefined, env: AppEnv['Bindings']): stri
   return new URL(env.SITE_URL).origin; // 兜底：回站点首页
 }
 
-app.get('/github/start', async (c) => {
-  const cfg = await getConfig(c.env);
-  if (!cfg) return page(c, 'GitHub 登录未配置', '管理员尚未完成 GitHub OAuth 配置（KV: config:oauth:github）。', 503);
+const KNOWN_PROVIDERS = new Set(['github']); // 后续接入在此扩展（配置键：config:oauth:<provider>）
+
+app.get('/start/:provider', async (c) => {
+  const provider = c.req.param('provider');
+  if (!KNOWN_PROVIDERS.has(provider)) return page(c, '暂不支持', `登录方式 ${provider} 尚未开通。`, 404);
+  const cfg = await getConfig(c.env, provider);
+  if (!cfg) return page(c, `${provider} 登录未配置`, `管理员尚未完成 ${provider} OAuth 配置（KV: config:oauth:${provider}）。`, 503);
 
   const redirect = safeRedirect(c.req.query('redirect'), c.env);
   const state = randomToken(18);
@@ -106,15 +110,17 @@ app.get('/github/start', async (c) => {
 
   const authorize = new URL('https://github.com/login/oauth/authorize');
   authorize.searchParams.set('client_id', cfg.client_id);
-  authorize.searchParams.set('redirect_uri', `${callbackOrigin(c.env, cfg)}/oauth/github/callback`);
+  authorize.searchParams.set('redirect_uri', `${callbackOrigin(c.env, cfg)}/oauth/callback/${provider}`);
   authorize.searchParams.set('scope', 'read:user user:email');
   authorize.searchParams.set('state', state);
   return c.redirect(authorize.toString(), 302);
 });
 
-app.get('/github/callback', async (c) => {
-  const cfg = await getConfig(c.env);
-  if (!cfg) return page(c, 'GitHub 登录未配置', '管理员尚未完成 GitHub OAuth 配置。', 503);
+app.get('/callback/:provider', async (c) => {
+  const provider = c.req.param('provider');
+  if (!KNOWN_PROVIDERS.has(provider)) return page(c, '暂不支持', `登录方式 ${provider} 尚未开通。`, 404);
+  const cfg = await getConfig(c.env, provider);
+  if (!cfg) return page(c, `${provider} 登录未配置`, `管理员尚未完成 ${provider} OAuth 配置。`, 503);
 
   const qError = c.req.query('error');
   if (qError) {
@@ -138,7 +144,7 @@ app.get('/github/callback', async (c) => {
       client_id: cfg.client_id,
       client_secret: cfg.client_secret,
       code: ghCode,
-      redirect_uri: `${callbackOrigin(c.env, cfg)}/oauth/github/callback`,
+      redirect_uri: `${callbackOrigin(c.env, cfg)}/oauth/callback/${provider}`,
     }),
   });
   const tokenBody = (await tokenRes.json().catch(() => ({}))) as { access_token?: string; error_description?: string };

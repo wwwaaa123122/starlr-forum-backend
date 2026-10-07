@@ -25,7 +25,7 @@ import { uploadRoutes, fileRoutes } from './routes/upload';
 import adminRoutes from './routes/admin';
 import wellKnownRoutes from './routes/well-known';
 import oauthRoutes from './routes/oauth';
-import githubOauthRoutes from './routes/oauth-github';
+import githubOauthRoutes from './routes/oauth-consumer';
 
 const app = new Hono<AppEnv>();
 
@@ -75,7 +75,7 @@ app.route('/api', fileRoutes); // GET /api/files/*（R2 图片）、GET /api/ava
 app.route('/api/admin', adminRoutes);
 app.route('/.well-known', wellKnownRoutes);
 app.route('/oauth', oauthRoutes);
-app.route('/oauth', githubOauthRoutes); // GET /github/start、/github/callback
+app.route('/oauth', githubOauthRoutes); // GET /start/:provider、/callback/:provider
 
 // 当前用户资料
 app.route('/api/me', meRoutes);
