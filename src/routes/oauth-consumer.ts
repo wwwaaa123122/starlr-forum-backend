@@ -51,7 +51,7 @@ const REDIRECT_ALLOWLIST = new Set([
   'http://127.0.0.1:5174',
 ]);
 
-interface GithubConfig {
+export interface GithubConfig {
   client_id: string;
   client_secret: string;
   callback_origin?: string;
@@ -80,7 +80,7 @@ function page(c: Context<AppEnv>, title: string, message: string, status = 200) 
   return c.body(html, status as ContentfulStatusCode, { 'Content-Type': 'text/html; charset=utf-8' });
 }
 
-async function getConfig(env: AppEnv['Bindings'], provider: string): Promise<GithubConfig | null> {
+export async function getConfig(env: AppEnv['Bindings'], provider: string): Promise<GithubConfig | null> {
   const raw = await env.CACHE.get(`config:oauth:${provider}`);
   if (!raw) return null;
   try {

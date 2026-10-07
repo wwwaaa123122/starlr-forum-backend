@@ -42,7 +42,7 @@ function textFromHtml(html: string): string {
 }
 
 /** 邮件 HTML 外壳（简洁、移动端友好） */
-function emailShell(title: string, bodyHtml: string, siteUrl: string): string {
+export function emailShell(title: string, bodyHtml: string, siteUrl: string): string {
   return `<!DOCTYPE html>
 <html><body style="margin:0;padding:0;background:#f4f5f7;font-family:-apple-system,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;">
   <div style="max-width:560px;margin:0 auto;padding:32px 16px;">
@@ -71,12 +71,39 @@ export async function sendEmail(env: Env, to: string | string[], subject: string
     return true;
   }
 
-  const apiKey = env.RESEND_API_KEY;
-  if (!apiKey) {
-    console.warn('[mail] RESEND_API_KEY 未配置，跳过发送:', subject);
-    return false;
+  const result = await deliverViaResend(env, recipients, subject, html, text);
+  if (!result.ok) console.error('[mail] 发送失败:', result.message);
+  return result.ok;
+}
+
+export interface MailDeliveryResult {
+  ok: boolean;
+  message: string;
+}
+
+/** Resend 投递：KV config:mail 优先，env（RESEND_API_KEY / MAIL_FROM）兜底 */
+export async function deliverViaResend(env: Env, recipients: string[], subject: string, html: string, text: string): Promise<MailDeliveryResult> {
+  let apiKey = env.RESEND_API_KEY;
+  let from = env.MAIL_FROM || 'Starlr Forum <no-reply@182030.xyz>';
+  let source = 'env';
+  try {
+    const raw = await env.CACHE.get('config:mail');
+    if (raw) {
+      const cfg = JSON.parse(raw) as { api_key?: string; from?: string };
+      if (cfg.api_key) {
+        apiKey = cfg.api_key;
+        source = 'kv';
+      }
+      if (cfg.from) from = cfg.from;
+    }
+  } catch {
+    // KV 异常时用 env 兜底
   }
-  const from = env.MAIL_FROM || 'Starlr Forum <no-reply@182030.xyz>';
+
+  if (!apiKey) {
+    console.warn('[mail] Resend 未配置（KV 与 env 均无 API Key），跳过发送:', subject);
+    return { ok: false, message: 'Resend 未配置：请在管理后台「服务配置 → 邮件」填写 API Key' };
+  }
 
   try {
     const res = await fetch('https://api.resend.com/emails', {
@@ -86,13 +113,14 @@ export async function sendEmail(env: Env, to: string | string[], subject: string
     });
     if (!res.ok) {
       const err = (await res.json().catch(() => ({}))) as ResendError;
-      console.error(`[mail] Resend 发送失败 ${res.status}:`, err.message ?? 'unknown');
-      return false;
+      const msg = err.message ?? 'unknown';
+      console.error(`[mail] Resend 发送失败 ${res.status}:`, msg);
+      return { ok: false, message: `Resend HTTP ${res.status}: ${msg}` };
     }
-    return true;
+    return { ok: true, message: `发送成功（配置来源：${source === 'kv' ? '管理后台' : '环境变量'}）` };
   } catch (e) {
     console.error('[mail] Resend 请求异常:', e instanceof Error ? e.message : e);
-    return false;
+    return { ok: false, message: `请求异常：${e instanceof Error ? e.message : String(e)}` };
   }
 }
 

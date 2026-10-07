@@ -23,6 +23,7 @@ import notificationRoutes from './routes/notifications';
 import reportRoutes from './routes/reports';
 import { uploadRoutes, fileRoutes } from './routes/upload';
 import adminRoutes from './routes/admin';
+import adminServiceRoutes from './routes/admin-services';
 import wellKnownRoutes from './routes/well-known';
 import oauthRoutes from './routes/oauth';
 import githubOauthRoutes from './routes/oauth-consumer';
@@ -73,6 +74,7 @@ app.route('/api/reports', reportRoutes);
 app.route('/api/upload', uploadRoutes);
 app.route('/api', fileRoutes); // GET /api/files/*（R2 图片）、GET /api/avatars/:uid（KV 头像）
 app.route('/api/admin', adminRoutes);
+app.route('/api/admin/services', adminServiceRoutes); // 第三方服务配置（邮件/S3/GitHub OAuth）
 app.route('/.well-known', wellKnownRoutes);
 app.route('/oauth', oauthRoutes);
 app.route('/oauth', githubOauthRoutes); // GET /start/:provider、/callback/:provider
