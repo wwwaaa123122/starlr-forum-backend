@@ -87,10 +87,12 @@ app.route('/api/me', meRoutes);
 app.get('/api/health', (c) => c.json({ status: 'ok', time: new Date().toISOString() }));
 
 // 公开站点配置（前端启动时获取 Turnstile site key 等）
+// TURNSTILE_DISABLED=true（本地开发）时不下发 site key，前端也就不渲染验证组件
 app.get('/api/config', (c) => {
   return c.json({
     siteName: 'Starlr Forum',
-    turnstileSiteKey: c.env.TURNSTILE_SITE_KEY || null,
+    turnstileSiteKey:
+      (!c.env.TURNSTILE_DISABLED && c.env.TURNSTILE_SITE_KEY) || null,
     registrationEnabled: true,
   });
 });
