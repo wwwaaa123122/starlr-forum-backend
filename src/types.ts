@@ -16,6 +16,8 @@ export interface Env {
   REFRESH_TOKEN_TTL: string;
   PASSWORD_ITERATIONS: string;
   ALLOWED_ORIGINS?: string;
+  /** 允许发起「登录状态同步」的第三方站点源（逗号分隔） */
+  SSO_ALLOWED_ORIGINS?: string;
   /** Turnstile 站点密钥（公开，可暴露给前端） */
   TURNSTILE_SITE_KEY?: string;
   /** 发件人（Resend），如：Starlr Forum <no-reply@182030.xyz> */

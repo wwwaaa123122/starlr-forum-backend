@@ -47,6 +47,7 @@
     "REFRESH_TOKEN_TTL": "2592000",
     "PASSWORD_ITERATIONS": "100000",
     "TURNSTILE_SITE_KEY": "0x4AAAAAAFOSQFHmv_Mdvjrg",
+    "SSO_ALLOWED_ORIGINS": "https://zako.mom",
     "MAIL_FROM": "星辰旅人论坛 <no-reply@182030.xyz>"
   },
   // 生产密钥（JWT_SIGNING_KEYS / TURNSTILE_SECRET_KEY）通过 wrangler secret put 注入：
