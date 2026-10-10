@@ -29,7 +29,7 @@ import { errors, ok } from '../lib/http';
 import { z } from 'zod';
 import { issueTokens } from '../lib/tokens';
 import { randomToken, sha256Hex, nowIso } from '../lib/ids';
-import { sessionInfoFrom } from '../lib/session-info';
+import { sessionInfoFrom, type SessionInfo } from '../lib/session-info';
 import { requireAuth } from '../middleware/auth';
 import { writeAuditLog } from '../lib/audit';
 import { publicUser } from './auth';
@@ -138,9 +138,12 @@ app.post('/issue', requireAuth, async (c) => {
 
   const userId = c.get('user')!.id;
   const ticket = randomToken(24);
+  // 终端用户会话快照：签发请求来自用户浏览器（CF-Connecting-IP 为真实 IP）；
+  // redeem 是 Worker 对 Worker 调用，需透传这份快照，审计与会话记录才不会记成 Cloudflare 出口 IP。
+  const sessionSnapshot = sessionInfoFrom(c);
   await c.env.CACHE.put(
     `sso:site:ticket:${await sha256Hex(ticket)}`,
-    JSON.stringify({ userId, origin, challenge: body.challenge }),
+    JSON.stringify({ userId, origin, challenge: body.challenge, session: sessionSnapshot }),
     { expirationTtl: TICKET_TTL },
   );
 
@@ -161,9 +164,20 @@ app.post('/redeem', async (c) => {
   if (!raw) throw errors.badRequest('登录同步凭证无效或已过期，请重试', 'SSO_TICKET_INVALID');
   await c.env.CACHE.delete(key); // 单次使用：先删再校验，避免重放
 
-  const data = JSON.parse(raw) as { userId: string; origin: string; challenge: string };
+  const data = JSON.parse(raw) as { userId: string; origin: string; challenge: string; session?: string };
   if (data.origin !== origin || data.challenge !== body.challenge) {
     throw errors.badRequest('登录同步凭证校验失败，请重试', 'SSO_TICKET_MISMATCH');
+  }
+
+  // 透传终端用户信息（签发时采集）；快照异常时退回当前请求的连接信息
+  let userSession: Partial<SessionInfo> | undefined;
+  if (data.session && data.session.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(data.session) as Partial<SessionInfo>;
+      if (typeof parsed.ip === 'string') userSession = parsed;
+    } catch {
+      userSession = undefined;
+    }
   }
 
   const row = await c.env.DB.prepare(
@@ -181,9 +195,9 @@ app.post('/redeem', async (c) => {
   if (!row) throw errors.badRequest('账号不存在', 'SSO_USER_MISSING');
   if (row.status !== 'active') throw errors.forbidden('该账号已被封禁', 'ACCOUNT_BANNED');
 
-  const tokens = await issueTokens(c.env, { id: row.id, role: row.role as 'user' | 'moderator' | 'admin' }, sessionInfoFrom(c));
+  const tokens = await issueTokens(c.env, { id: row.id, role: row.role as 'user' | 'moderator' | 'admin' }, sessionInfoFrom(c, userSession));
   await c.env.DB.prepare(`UPDATE users SET last_login_at = ?, updated_at = ? WHERE id = ?`).bind(nowIso(), nowIso(), row.id).run();
-  await writeAuditLog(c, { action: 'user.site_login', actorId: row.id, targetType: 'user', targetId: row.id, detail: `origin:${origin}` });
+  await writeAuditLog(c, { action: 'user.site_login', actorId: row.id, targetType: 'user', targetId: row.id, detail: `origin:${origin}`, ip: userSession?.ip });
 
   return ok(c, {
     user: { ...publicUser(row), email: row.email },

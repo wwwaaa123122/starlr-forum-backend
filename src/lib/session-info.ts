@@ -26,17 +26,20 @@ export interface SessionInfo {
   asn: number | null;
 }
 
-/** 采集当前请求的会话信息（Cloudflare IP 库） */
-export function sessionInfoFrom(c: Context<AppEnv>): string {
+/**
+ * 采集当前请求的会话信息（Cloudflare IP 库）。
+ * override：服务器对服务器调用（如 SSO 兑换）时透传终端用户在「签发请求」里的真实信息。
+ */
+export function sessionInfoFrom(c: Context<AppEnv>, override?: Partial<SessionInfo>): string {
   const cf = (c.req.raw as unknown as { cf?: IncomingRequestCfProperties }).cf;
   const info: SessionInfo = {
-    ua: (c.req.header('user-agent') ?? '').slice(0, 200),
-    ip: c.req.header('cf-connecting-ip') ?? c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ?? '',
-    country: (cf?.country as string) ?? '',
-    region: (cf?.region as string) ?? '',
-    city: (cf?.city as string) ?? '',
-    colo: (cf?.colo as string) ?? '',
-    asn: typeof cf?.asn === 'number' ? cf.asn : null,
+    ua: override?.ua ?? (c.req.header('user-agent') ?? '').slice(0, 200),
+    ip: override?.ip ?? c.req.header('cf-connecting-ip') ?? c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ?? '',
+    country: override?.country ?? (cf?.country as string) ?? '',
+    region: override?.region ?? (cf?.region as string) ?? '',
+    city: override?.city ?? (cf?.city as string) ?? '',
+    colo: override?.colo ?? (cf?.colo as string) ?? '',
+    asn: override?.asn ?? (typeof cf?.asn === 'number' ? cf.asn : null),
   };
   return JSON.stringify(info).slice(0, 500);
 }

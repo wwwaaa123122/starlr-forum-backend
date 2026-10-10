@@ -10,6 +10,8 @@ export interface AuditEntry {
   targetType?: string;
   targetId?: string;
   detail?: string;
+  /** 覆盖 IP：服务器对服务器调用（如 SSO 兑换）时透传终端用户真实 IP */
+  ip?: string;
 }
 
 export async function writeAuditLog(
@@ -17,7 +19,7 @@ export async function writeAuditLog(
   entry: AuditEntry,
 ): Promise<void> {
   try {
-    const ip = c.req.header('cf-connecting-ip') ?? '';
+    const ip = entry.ip ?? c.req.header('cf-connecting-ip') ?? '';
     await c.env.DB.prepare(
       `INSERT INTO audit_logs (id, actor_id, action, target_type, target_id, detail, ip, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
