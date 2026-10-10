@@ -62,6 +62,15 @@ app.use('/api/*', async (c, next) => {
   await next();
 });
 
+// API 响应默认禁止缓存：登录/令牌/资料等响应不得进入任何共享缓存
+// （个别公开端点如 /api/auth/site-login/origins 在路由内显式覆盖为短缓存）
+app.use('/api/*', async (c, next) => {
+  await next();
+  if (!c.res.headers.get('Cache-Control')) {
+    c.header('Cache-Control', 'no-store');
+  }
+});
+
 app.use('/api/*', optionalAuth);
 
 // ---------- 路由 ----------
