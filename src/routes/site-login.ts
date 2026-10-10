@@ -32,6 +32,7 @@ import { randomToken, sha256Hex, nowIso } from '../lib/ids';
 import { sessionInfoFrom, type SessionInfo } from '../lib/session-info';
 import { requireAuth } from '../middleware/auth';
 import { writeAuditLog } from '../lib/audit';
+import { RATE_LIMITS, clientFingerprint, consumeRateLimit } from '../lib/rate-limit';
 import { publicUser } from './auth';
 
 const TICKET_TTL = 120;
@@ -152,6 +153,10 @@ app.post('/issue', requireAuth, async (c) => {
 
 /** POST /redeem — 第三方站点后端用 ticket 兑换 token（ticket 即凭证，单次使用） */
 app.post('/redeem', async (c) => {
+  // 服务器间调用无用户身份：按来源 IP 限流，防止 ticket 爆破/接口滥用
+  const rl = await consumeRateLimit(c.env, RATE_LIMITS.ssoRedeem, await clientFingerprint(c));
+  if (!rl.ok) throw errors.tooMany('请求过于频繁，请稍后再试');
+
   const cfg = await getSsoAccessConfig(c.env);
   const body = await parseJson(c, redeemSchema);
   const origin = normalizeOrigin(body.origin);

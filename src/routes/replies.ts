@@ -4,7 +4,8 @@ import { z } from 'zod';
 import type { AppEnv } from '../types';
 import { errors, ok } from '../lib/http';
 import { parseJson } from '../lib/validate';
-import { requireAuth } from '../middleware/auth';
+import { assertNotMuted, requireAuth } from '../middleware/auth';
+import { assertCategoryScope } from '../lib/moderation';
 import { newId, nowIso } from '../lib/ids';
 import { bumpPostCounter, bumpUserCounter } from '../lib/queries';
 import { createNotification } from '../lib/notify';
@@ -19,15 +20,23 @@ const updateReplySchema = z.object({
 app.patch('/:id', requireAuth, async (c) => {
   const id = c.req.param('id');
   const user = c.get('user')!;
+  // 与创建回复一致：禁言用户不得编辑内容（含编辑自己的回复）
+  await assertNotMuted(c);
   const body = await parseJson(c, updateReplySchema);
 
-  const reply = await c.env.DB.prepare(`SELECT id, author_id, is_deleted FROM replies WHERE id = ?`)
+  const reply = await c.env.DB.prepare(
+    `SELECT r.id, r.author_id, r.is_deleted, p.category_id AS category_id
+     FROM replies r JOIN posts p ON p.id = r.post_id WHERE r.id = ?`,
+  )
     .bind(id)
-    .first<{ id: string; author_id: string; is_deleted: number }>();
+    .first<{ id: string; author_id: string; is_deleted: number; category_id: string }>();
   if (!reply || reply.is_deleted) throw errors.notFound('回复不存在');
-  if (reply.author_id !== user.id && user.role !== 'admin' && user.role !== 'moderator') {
+  const canModerate = user.role === 'admin' || user.role === 'moderator';
+  if (reply.author_id !== user.id && !canModerate) {
     throw errors.forbidden('只能编辑自己的回复');
   }
+  // 版主代编辑需辖区校验：admin 全站放行，moderator 仅限回复所属帖子的版块（作者本人编辑不受此限）
+  if (reply.author_id !== user.id) await assertCategoryScope(c.env, user, reply.category_id);
 
   await c.env.DB.prepare(`UPDATE replies SET content = ?, updated_at = ?, edited_at = ? WHERE id = ?`)
     .bind(body.content, nowIso(), nowIso(), id)
@@ -38,13 +47,18 @@ app.patch('/:id', requireAuth, async (c) => {
 app.delete('/:id', requireAuth, async (c) => {
   const id = c.req.param('id');
   const user = c.get('user')!;
-  const reply = await c.env.DB.prepare(`SELECT id, author_id, post_id, is_deleted FROM replies WHERE id = ?`)
+  const reply = await c.env.DB.prepare(
+    `SELECT r.id, r.author_id, r.post_id, r.is_deleted, p.category_id AS category_id
+     FROM replies r JOIN posts p ON p.id = r.post_id WHERE r.id = ?`,
+  )
     .bind(id)
-    .first<{ id: string; author_id: string; post_id: string; is_deleted: number }>();
+    .first<{ id: string; author_id: string; post_id: string; is_deleted: number; category_id: string }>();
   if (!reply) throw errors.notFound('回复不存在');
 
   const canModerate = user.role === 'admin' || user.role === 'moderator';
   if (reply.author_id !== user.id && !canModerate) throw errors.forbidden('只能删除自己的回复');
+  // 版主代删需辖区校验：admin 全站放行，moderator 仅限回复所属帖子的版块（作者本人删回复不受此限）
+  if (reply.author_id !== user.id) await assertCategoryScope(c.env, user, reply.category_id);
   if (reply.is_deleted) throw errors.badRequest('回复已处于删除状态');
 
   await c.env.DB.batch([

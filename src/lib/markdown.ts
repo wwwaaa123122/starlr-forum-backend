@@ -12,9 +12,21 @@ function escapeHtml(s: string): string {
     .replace(/'/g, '&#39;');
 }
 
-/** 链接/图片地址白名单：http(s):// 或 / 开头 */
+/** 反转义 HTML 实体（safeUrl 的输入来自整体转义后的正文，先还原再做白名单校验） */
+function unescapeHtml(s: string): string {
+  return s
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    // &amp; 必须最后还原，避免 &amp;lt; 这类原文被二次解开
+    .replace(/&amp;/g, '&');
+}
+
+/** 链接/图片地址白名单：http(s):// 或 / 开头。
+ *  输入是整体 escapeHtml 后的文本：先还原再校验、只转义一次，避免 URL 中的 & 被渲染成 &amp;amp; */
 function safeUrl(url: string): string | null {
-  const u = url.trim();
+  const u = unescapeHtml(url.trim());
   if (/^https?:\/\//i.test(u)) return escapeHtml(u);
   if (u.startsWith('/') && !u.startsWith('//')) return escapeHtml(u);
   return null;

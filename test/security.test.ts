@@ -163,11 +163,11 @@ describe('暴力登录与限流', () => {
   it('登录失败超过阈值后被限流（429）', async () => {
     const target = await createUser({ username: 'bruteforce' });
     let lastStatus = 0;
-    // login 限流：10 次 / 600 秒（按 UA 指纹）
+    // login 限流：10 次 / 600 秒（按 CF-Connecting-IP 指纹）
     for (let i = 0; i < 12; i++) {
       const res = await req('/api/auth/login', {
         method: 'POST',
-        headers: { 'user-agent': 'bruteforce-probe' }, // 固定 UA → 同一限流指纹
+        headers: { 'cf-connecting-ip': '10.200.0.9' }, // 固定客户端 IP → 同一限流指纹
         body: { identifier: target.username, password: 'WrongPassword!' },
       });
       lastStatus = res.status;
@@ -181,7 +181,7 @@ describe('暴力登录与限流', () => {
     for (let i = 0; i < 12; i++) {
       const r = await req('/api/auth/login', {
         method: 'POST',
-        headers: { 'user-agent': 'rate-structure-probe' },
+        headers: { 'cf-connecting-ip': '10.200.0.10' },
         body: { identifier: 'anyone', password: 'x' },
       });
       lastStatus = r.status;
@@ -190,14 +190,14 @@ describe('暴力登录与限流', () => {
     expect(lastStatus).toBe(429);
     const res = await req('/api/auth/login', {
       method: 'POST',
-      headers: { 'user-agent': 'rate-structure-probe' },
+      headers: { 'cf-connecting-ip': '10.200.0.10' },
       body: { identifier: 'anyone', password: 'x' },
     });
     expect(res.status).toBe(429);
     expect(res.body.error.code).toBe('RATE_LIMITED');
   });
 
-  it('正常用户（不同指纹）不受影响', async () => {
+  it('正常用户（不同客户端 IP 指纹）不受影响', async () => {
     const user = await createUser({ username: 'ratelimitclean' });
     const res = await login(user.username, user.password);
     expect(res.status).toBe(200);

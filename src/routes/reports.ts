@@ -8,6 +8,7 @@ import { requireAuth } from '../middleware/auth';
 import { RATE_LIMITS, consumeRateLimit } from '../lib/rate-limit';
 import { newId, nowIso } from '../lib/ids';
 import { sendAdminAlert } from '../lib/mail';
+import { escapeHtml } from '../lib/markdown';
 
 const app = new Hono<AppEnv>();
 
@@ -67,15 +68,17 @@ app.post('/', requireAuth, async (c) => {
   }
 
   // 邮件告警管理员（失败不影响举报提交）
+  // 昵称/用户名/目标 ID/详情均为用户可控，插入 HTML 邮件前必须转义（写法参照 routes/auth.ts 的 escapeHtml 用法）；
+  // targetType/reason 是服务端枚举值，非用户可控。
   await sendAdminAlert(
     c.env,
     `新的举报（${body.targetType}）`,
-    `<p><strong>${user.nickname}</strong>（UID ${user.uid ?? '-'}，@${user.username}）提交了举报。</p>
+    `<p><strong>${escapeHtml(user.nickname)}</strong>（UID ${user.uid ?? '-'}，@${escapeHtml(user.username)}）提交了举报。</p>
      <ul>
        <li>目标类型：${body.targetType}</li>
-       <li>目标 ID：${body.targetId}</li>
+       <li>目标 ID：${escapeHtml(body.targetId)}</li>
        <li>原因：${body.reason}</li>
-       <li>详情：${body.detail || '（无）'}</li>
+       <li>详情：${body.detail ? escapeHtml(body.detail) : '（无）'}</li>
      </ul>
      <p><a href="${c.env.SITE_URL}/admin">前往管理后台处理 →</a></p>`,
   );

@@ -10,7 +10,11 @@ export interface ApiResponse<T = any> {
 
 let requestCounter = 0;
 
-/** 每次请求使用不同 UA，避免测试之间触发同一限流指纹 */
+/**
+ * 每次请求使用不同 UA + 不同客户端 IP。
+ * 限流键 = SHA-256(CF-Connecting-IP)：轮换 IP 才能避免测试之间触发同一限流指纹；
+ * 显式传入 headers 的 cf-connecting-ip 可固定指纹（如爆破限流用例）。
+ */
 export async function req<T = any>(
   path: string,
   options: {
@@ -22,8 +26,10 @@ export async function req<T = any>(
     cf?: Record<string, unknown>;
   } = {},
 ): Promise<ApiResponse<T>> {
+  const seq = requestCounter++;
   const headers: Record<string, string> = {
-    'user-agent': `vitest-agent-${requestCounter++}`,
+    'user-agent': `vitest-agent-${seq}`,
+    'cf-connecting-ip': `10.64.${Math.floor(seq / 250) % 250}.${(seq % 250) + 1}`,
     ...options.headers,
   };
   // FormData（multipart 上传）不能序列化，也不应手动设置 Content-Type（需保留边界）

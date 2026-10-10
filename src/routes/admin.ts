@@ -14,6 +14,7 @@ import { newId, nowIso } from '../lib/ids';
 import { writeAuditLog } from '../lib/audit';
 import { createNotification } from '../lib/notify';
 import { sendEmail } from '../lib/mail';
+import { escapeHtml } from '../lib/markdown';
 import { CATEGORY_CACHE_KEY } from './categories';
 import { RATE_LIMITS, consumeRateLimit } from '../lib/rate-limit';
 
@@ -43,8 +44,9 @@ app.post('/users/:id/verify', requireAdmin, async (c) => {
   return ok(c, { success: true });
 });
 
-/** 当前管理员/版主列表（ownerEmail = UID 1 的邮箱，管理告警收件人） */
-app.get('/admins', async (c) => {
+/** 当前管理员/版主列表（ownerEmail = UID 1 的邮箱，管理告警收件人）。
+ *  仅 admin 可见：列表含全部管理员/版主的邮箱，版主不应查看。 */
+app.get('/admins', requireAdmin, async (c) => {
   const { results } = await c.env.DB.prepare(
     `SELECT id, uid, username_raw AS username, email, nickname, role, created_at AS createdAt, last_login_at AS lastLoginAt
      FROM users WHERE role IN ('admin', 'moderator') AND status = 'active'
@@ -82,12 +84,13 @@ app.post('/admins', requireAdmin, async (c) => {
     targetId: target.id,
     detail: `UID ${target.uid} → ${body.role}`,
   });
+  // 目标昵称/用户名为用户可控，插入 HTML 邮件前转义（写法参照 routes/auth.ts 的 escapeHtml 用法）
   await sendEmail(
     c.env,
     target.email,
     `你已被授予${body.role === 'admin' ? '管理员' : '版主'}权限`,
-    `<p>你好，<strong>${target.nickname}</strong>：</p>
-     <p>你的账号（UID ${target.uid}，@${target.username_raw}）已被授予<strong>${body.role === 'admin' ? '管理员' : '版主'}</strong>权限。</p>
+    `<p>你好，<strong>${escapeHtml(target.nickname)}</strong>：</p>
+     <p>你的账号（UID ${target.uid}，@${escapeHtml(target.username_raw)}）已被授予<strong>${body.role === 'admin' ? '管理员' : '版主'}</strong>权限。</p>
      <p><a href="${c.env.SITE_URL}/admin">前往管理后台 →</a></p>`,
   ).catch(() => undefined);
 
@@ -471,7 +474,8 @@ app.get('/posts', requireRole('moderator', 'admin'), async (c) => {
   if (status === 'normal') where.push('p.is_deleted = 0');
   if (status === 'deleted') where.push('p.is_deleted = 1');
   if (query) {
-    where.push('p.title LIKE ? ESCAPE \'\'');
+    // ESCAPE '\\'（TS 字符串落到 SQL 即 ESCAPE '\'）：原 ESCAPE '' 在 SQLite 会报错
+    where.push("p.title LIKE ? ESCAPE '\\'");
     params.push(`%${query.replace(/[%_\\]/g, '')}%`);
   }
   if (scope !== '*') {

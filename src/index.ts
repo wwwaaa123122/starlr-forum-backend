@@ -41,6 +41,16 @@ app.use('*', async (c, next) => {
   await next();
 });
 
+// 安全响应头（全局，挂在 requestId 旁）：nosniff 防 MIME 嗅探、DENY 防点击劫持、
+// Referrer-Policy 限制外泄完整 URL。刻意不加 CSP（避免破坏 SPA/静态资源），
+// 也不触碰 API 的 Cache-Control 逻辑（由下方 /api/* 中间件与各路由自理）。
+app.use('*', async (c, next) => {
+  await next();
+  c.header('X-Content-Type-Options', 'nosniff');
+  c.header('X-Frame-Options', 'DENY');
+  c.header('Referrer-Policy', 'strict-origin-when-cross-origin');
+});
+
 // CORS：默认同域部署无需开启；独立域名部署时配置 ALLOWED_ORIGINS（逗号分隔）
 app.use('/api/*', async (c, next) => {
   const origin = c.req.header('origin');

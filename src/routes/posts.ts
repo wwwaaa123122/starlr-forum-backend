@@ -6,7 +6,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import type { AppEnv } from '../types';
 import { errors, ok } from '../lib/http';
-import { moderationScope, inScope } from '../lib/moderation';
+import { moderationScope, inScope, assertCategoryScope } from '../lib/moderation';
 import { parseJson, parseQuery, paginationSchema, paginationMeta } from '../lib/validate';
 import { RATE_LIMITS, clientFingerprint, consumeRateLimit } from '../lib/rate-limit';
 import { assertNotMuted, requireAuth, optionalAuth, requireVerified } from '../middleware/auth';
@@ -166,12 +166,18 @@ app.post('/', requireAuth, requireVerified, async (c) => {
   await notifyMentions(c.env, body.content, { actorId: user.id, postId });
 
   // SEO：百度主动推送新帖 URL（未配置 token 时静默跳过，不阻塞发帖）
-  c.executionCtx.waitUntil(
-    (async () => {
-      const { pushPostUrl } = await import('../lib/seo-push');
-      await pushPostUrl(c.env, postId);
-    })().catch(() => undefined),
-  );
+  // c.executionCtx 仅在真实 Worker fetch 环境存在；app.request()（vitest）没有
+  // ExecutionContext 会抛错，这里兜住并跳过推送，保证发帖主流程不受影响。
+  try {
+    c.executionCtx.waitUntil(
+      (async () => {
+        const { pushPostUrl } = await import('../lib/seo-push');
+        await pushPostUrl(c.env, postId);
+      })().catch(() => undefined),
+    );
+  } catch {
+    /* 无 ExecutionContext（测试环境）：跳过推送 */
+  }
 
   return ok(c, { id: postId }, { status: 201 });
 });
@@ -245,6 +251,8 @@ app.get('/:id', optionalAuth, async (c) => {
 app.patch('/:id', requireAuth, async (c) => {
   const id = c.req.param('id');
   const user = c.get('user')!;
+  // 与创建帖子一致：禁言用户不得编辑内容（含编辑自己的帖子）
+  await assertNotMuted(c);
   const body = await parseJson(c, updatePostSchema);
 
   const post = await c.env.DB.prepare(`SELECT id, author_id, category_id, is_deleted FROM posts WHERE id = ?`)
@@ -254,6 +262,8 @@ app.patch('/:id', requireAuth, async (c) => {
 
   const canModerate = user.role === 'admin' || user.role === 'moderator';
   if (post.author_id !== user.id && !canModerate) throw errors.forbidden('只能编辑自己的帖子');
+  // 版主代编辑需辖区校验：admin 全站放行，moderator 仅限所辖版块（作者本人编辑自己帖子不受此限）
+  if (post.author_id !== user.id) await assertCategoryScope(c.env, user, post.category_id);
 
   const sets: string[] = [];
   const values: unknown[] = [];
@@ -306,13 +316,15 @@ app.patch('/:id', requireAuth, async (c) => {
 app.delete('/:id', requireAuth, async (c) => {
   const id = c.req.param('id');
   const user = c.get('user')!;
-  const post = await c.env.DB.prepare(`SELECT id, author_id, is_deleted FROM posts WHERE id = ?`)
+  const post = await c.env.DB.prepare(`SELECT id, author_id, category_id, is_deleted FROM posts WHERE id = ?`)
     .bind(id)
-    .first<{ id: string; author_id: string; is_deleted: number }>();
+    .first<{ id: string; author_id: string; category_id: string; is_deleted: number }>();
   if (!post) throw errors.notFound('帖子不存在');
 
   const canModerate = user.role === 'admin' || user.role === 'moderator';
   if (post.author_id !== user.id && !canModerate) throw errors.forbidden('只能删除自己的帖子');
+  // 版主代删需辖区校验：admin 全站放行，moderator 仅限所辖版块（作者本人删帖不受此限）
+  if (post.author_id !== user.id) await assertCategoryScope(c.env, user, post.category_id);
   if (post.is_deleted) throw errors.badRequest('帖子已处于删除状态');
 
   await c.env.DB.prepare(
@@ -329,6 +341,10 @@ app.delete('/:id', requireAuth, async (c) => {
 app.post('/:id/view', async (c) => {
   const id = c.req.param('id');
   const fingerprint = await clientFingerprint(c);
+  // 匿名端点且每次可能产生 1 次 KV 写 + 1 次 D1 插入：按 IP 限流（与其他端点一致返回 429）
+  const rl = await consumeRateLimit(c.env, RATE_LIMITS.view, fingerprint);
+  if (!rl.ok) throw errors.tooMany('浏览请求过于频繁，请稍后再试');
+
   const dedupeKey = `view:${id}:${fingerprint}`;
   const seen = await c.env.CACHE.get(dedupeKey);
   if (seen) return ok(c, { counted: false });

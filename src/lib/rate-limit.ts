@@ -27,17 +27,26 @@ export const RATE_LIMITS = {
   like: { bucket: 'like', limit: 60, window: 60 },
   notification: { bucket: 'notif', limit: 120, window: 60 },
   resendVerify: { bucket: 'resend-verify', limit: 3, window: 3600 },
+  /** 匿名浏览计数端点（每次可能 1 次 KV 写 + 1 次 D1 插入，必须按 IP 限流） */
+  view: { bucket: 'view', limit: 60, window: 60 },
+  /** SSO ticket 兑换（服务器间调用无用户身份，按来源 IP 限流） */
+  ssoRedeem: { bucket: 'sso-redeem', limit: 30, window: 60 },
 } satisfies Record<string, RateLimitRule>;
 
-/** 客户端指纹：优先 CF-Connecting-IP，回退 UA 哈希 */
+/**
+ * 客户端限流键：只用 CF-Connecting-IP（Cloudflare 边缘注入的真实客户端 IP），
+ * 无该头时（本地 dev / 非 CF 环境）回退固定值 'unknown'。
+ * 刻意不再混入 User-Agent 与 X-Forwarded-For：UA 可逐请求轮换、XFF 可伪造，
+ * 混入会让登录爆破、邮件轰炸者轻松绕过限流。账号级桶（如 login:<identifier>）逻辑不变。
+ * 仍返回 SHA-256 前缀指纹，KV 键中不保存原始 IP。
+ */
 interface FingerprintSource {
   req: { header: (name: string) => string | undefined };
 }
 
 export async function clientFingerprint(c: FingerprintSource): Promise<string> {
-  const ip = c.req.header('cf-connecting-ip') ?? c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ?? '';
-  const ua = c.req.header('user-agent') ?? '';
-  const hash = await sha256Hex(`${ip}|${ua}`);
+  const ip = c.req.header('cf-connecting-ip') ?? 'unknown';
+  const hash = await sha256Hex(ip);
   return hash.slice(0, 24);
 }
 

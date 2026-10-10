@@ -8,6 +8,7 @@
  *    并统一 canonical 到主域。
  */
 import type { Env } from '../types';
+import { escapeHtml } from './markdown';
 
 export interface SeoConfig {
   /** 唯一对外主域（不带协议）。抓取/canonical/sitemap 全部归并到这里 */
@@ -93,6 +94,10 @@ export function renderPage(opts: {
   spaScript?: string;
 }): string {
   const { meta, cfg, host, bodyHtml, mode } = opts;
+  // meta.title / meta.description 常含用户可控内容（帖子标题、摘要、用户 bio/昵称等，见 routes/seo.ts 各调用点，
+  // 调用方均传原文、未自行转义），在此统一做一次 HTML 转义，防止爬虫渲染页（含 og:title/og:description）的存储型 XSS。
+  const safeTitle = escapeHtml(meta.title);
+  const safeDescription = escapeHtml(meta.description);
   const canonical = canonicalUrl(cfg, meta.path);
   const jsonLd = (meta.jsonLd ?? []).map((o) => `<script type="application/ld+json">${JSON.stringify(o).replace(/</g, '\\u003c')}</script>`).join('\n  ');
   const robots = meta.noindex ? '<meta name="robots" content="noindex, follow" />' : `<meta name="robots" content="index, follow, max-image-preview:large" />`;
@@ -108,14 +113,14 @@ export function renderPage(opts: {
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-<title>${meta.title}</title>
-<meta name="description" content="${meta.description}" />
+<title>${safeTitle}</title>
+<meta name="description" content="${safeDescription}" />
 ${robots}
 <link rel="canonical" href="${canonical}" />
 <meta property="og:site_name" content="星辰旅人论坛" />
 <meta property="og:type" content="${ogType}" />
-<meta property="og:title" content="${meta.title}" />
-<meta property="og:description" content="${meta.description}" />
+<meta property="og:title" content="${safeTitle}" />
+<meta property="og:description" content="${safeDescription}" />
 <meta property="og:url" content="${canonical}" />
 <meta property="og:locale" content="zh_CN" />
 <meta name="twitter:card" content="summary" />
