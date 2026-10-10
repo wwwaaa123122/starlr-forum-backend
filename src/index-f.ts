@@ -20,6 +20,6 @@ app.get('/sitemap.xml', (c) => c.redirect('https://forum.182030.xyz/sitemap.xml'
 app.get('/feed.xml', (c) => c.redirect('https://forum.182030.xyz/feed.xml', 301));
 
 // 兜底（理论不可达）：仍转发资源层
-app.all('*', (c) => c.env.ASSETS.fetch(c.req.raw));
+app.all('*', (c) => c.env.ASSETS?.fetch(c.req.raw) ?? c.body(null, 404));
 
 export default app;

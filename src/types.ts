@@ -6,7 +6,8 @@ export interface Env {
   DB: D1Database;
   CACHE: KVNamespace;
   UPLOADS: R2Bucket;
-  ASSETS: Fetcher;
+  /** 静态资源绑定：仅 x（SPA）与 f（纯前端）Worker 有；纯 API Worker（forum-backend）无 */
+  ASSETS?: Fetcher;
 
   // --- 普通变量 ---
   SITE_URL: string;

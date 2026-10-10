@@ -15,6 +15,16 @@ import { newId } from '../lib/ids';
 
 const app = new Hono<AppEnv>();
 
+/**
+ * 真人访问兜底：有 ASSETS（x / f Worker）→ 转发 SPA 资源；
+ * 无 ASSETS（纯 API Worker forum-backend）→ 空 404（与 index.ts notFound 约定一致，
+ * 不返回任何 JSON/版本/接口线索，避免被扫描与逆向）。
+ */
+async function spaFallback(c: Context<AppEnv>): Promise<Response> {
+  if (c.env.ASSETS) return c.env.ASSETS.fetch(c.req.raw);
+  return c.body(null, 404);
+}
+
 const SITE_NAME = '星辰旅人论坛';
 const SITE_TAGLINE = '一个把论坛装进时间线的社区';
 
@@ -127,7 +137,7 @@ const esc = escapeHtml;
 
 app.get('/', async (c) => {
   const ua = c.req.header('User-Agent') ?? '';
-  if (!isCrawler(c)) return c.env.ASSETS.fetch(c.req.raw); // 真人 → SPA
+  if (!isCrawler(c)) return spaFallback(c); // 真人 → SPA
   const cfg = await getSeoConfig(c.env);
   const base = siteRoot(cfg);
   const { results: posts } = await c.env.DB
@@ -162,7 +172,7 @@ app.get('/', async (c) => {
 
 app.get('/post/:id', async (c) => {
   const id = c.req.param('id');
-  if (!isCrawler(c)) return c.env.ASSETS.fetch(c.req.raw);
+  if (!isCrawler(c)) return spaFallback(c);
   const cfg = await getSeoConfig(c.env);
   const base = siteRoot(cfg);
   const row = await c.env.DB
@@ -172,7 +182,7 @@ app.get('/post/:id', async (c) => {
               WHERE p.id = ? AND p.is_deleted = 0`)
     .bind(id)
     .first<{ id: string; title: string; content: string; created_at: string; updated_at: string | null; reply_count: number; view_count: number; like_count: number; nickname: string | null; username_raw: string; cat_name: string | null; cat_slug: string | null }>();
-  if (!row) return c.env.ASSETS.fetch(c.req.raw);
+  if (!row) return spaFallback(c);
 
   const { results: replies } = await c.env.DB
     .prepare(`SELECT r.content, r.created_at, u.nickname, u.username_raw
@@ -242,7 +252,7 @@ ${repliesHtml}`,
 });
 
 app.get('/categories', async (c) => {
-  if (!isCrawler(c)) return c.env.ASSETS.fetch(c.req.raw);
+  if (!isCrawler(c)) return spaFallback(c);
   const cfg = await getSeoConfig(c.env);
   const base = siteRoot(cfg);
   const { results: cats } = await c.env.DB
@@ -273,21 +283,21 @@ app.get('/categories', async (c) => {
 // 板块页真人 URL 是 /explore?category=<slug>；爬虫 301 归并到同一 URL，保证收录地址与真人一致
 app.get('/c/:slug', async (c) => {
   const slug = c.req.param('slug');
-  if (!isCrawler(c)) return c.env.ASSETS.fetch(c.req.raw);
+  if (!isCrawler(c)) return spaFallback(c);
   const cfg = await getSeoConfig(c.env);
   return c.redirect(`${siteRoot(cfg)}/explore?category=${encodeURIComponent(slug)}`, 301);
 });
 
 app.get('/u/:username', async (c) => {
   const username = decodeURIComponent(c.req.param('username'));
-  if (!isCrawler(c)) return c.env.ASSETS.fetch(c.req.raw);
+  if (!isCrawler(c)) return spaFallback(c);
   const cfg = await getSeoConfig(c.env);
   const base = siteRoot(cfg);
   const u = await c.env.DB
     .prepare(`SELECT username_raw, nickname, bio, avatar_url, created_at FROM users WHERE (username = ? OR username_raw = ?) AND status = 'active'`)
     .bind(username.toLowerCase(), username)
     .first<{ username_raw: string; nickname: string | null; bio: string | null; avatar_url: string | null; created_at: string }>();
-  if (!u) return c.env.ASSETS.fetch(c.req.raw);
+  if (!u) return spaFallback(c);
   const { results: posts } = await c.env.DB
     .prepare(`SELECT id, title, content, created_at FROM posts WHERE author_id = (SELECT id FROM users WHERE username_raw = ?) AND is_deleted = 0 ORDER BY created_at DESC LIMIT 30`)
     .bind(u.username_raw)
@@ -312,7 +322,7 @@ app.get('/u/:username', async (c) => {
 });
 
 app.get('/explore', async (c) => {
-  if (!isCrawler(c)) return c.env.ASSETS.fetch(c.req.raw);
+  if (!isCrawler(c)) return spaFallback(c);
   const cfg = await getSeoConfig(c.env);
   const base = siteRoot(cfg);
   const category = c.req.query('category');
