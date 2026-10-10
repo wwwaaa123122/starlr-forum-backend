@@ -28,6 +28,7 @@ import adminServiceRoutes from './routes/admin-services';
 import wellKnownRoutes from './routes/well-known';
 import oauthRoutes from './routes/oauth';
 import siteLoginRoutes from './routes/site-login';
+import adminSsoRoutes from './routes/admin-sso';
 import githubOauthRoutes from './routes/oauth-consumer';
 
 const app = new Hono<AppEnv>();
@@ -68,6 +69,7 @@ app.route('/', seoRoutes); // robots/sitemap/feed + 爬虫动态渲染（真人�
 app.route('/api/auth', authRoutes);
 app.route('/api/auth/oauth', githubOauthRoutes); // POST /exchange（GitHub 登录一次性码兑换）
 app.route('/api/auth/site-login', siteLoginRoutes); // 第三方站点登录状态同步（一次性 ticket）
+app.route('/api/admin/sso', adminSsoRoutes); // SSO 登录同步管理（白名单/总开关，仅 admin）
 app.route('/api/categories', categoryRoutes);
 app.route('/api/posts', postRoutes);
 app.route('/api/replies', replyRoutes);
