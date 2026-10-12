@@ -42,6 +42,7 @@ export const SSO_KV_KEY = 'config:sso';
 /** 允许发起登录同步的站点（未配置 KV / 环境变量时的兜底） */
 export const DEFAULT_SSO_ORIGINS = [
   'https://zako.mom',
+  'https://x.182030.xyz', // Android 客户端浏览器登录桥接页（/app-auth）
   'http://127.0.0.1:8788',
   'http://localhost:8788',
 ];
