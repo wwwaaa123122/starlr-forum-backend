@@ -133,12 +133,12 @@ app.post('/:key/test', async (c) => {
   if (key === 'mail') {
     if (!body.to) throw errors.badRequest('请填写测试收件邮箱', 'MAIL_TO_REQUIRED');
     const html = emailShell(
-      '星辰旅人论坛 · 测试邮件',
+      'Starlr Forum · 测试邮件',
       `<p>这是一封来自管理后台的测试邮件。收到即代表 Resend 配置可用。</p><p class="text-muted" style="color:#888;font-size:12px">${nowIso()}</p>`,
       c.env.SITE_URL,
     );
     // emailShell 返回完整 html，text 版本由 deliver 内部生成——直接复用 deliverViaResend
-    const result = await deliverViaResend(c.env, [body.to], '星辰旅人论坛 · 测试邮件', html, '这是一封来自管理后台的测试邮件。');
+    const result = await deliverViaResend(c.env, [body.to], 'Starlr Forum · 测试邮件', html, '这是一封来自管理后台的测试邮件。');
     return ok(c, result);
   }
 

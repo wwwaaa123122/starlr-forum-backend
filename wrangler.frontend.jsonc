@@ -1,4 +1,4 @@
-// 星辰旅人论坛 — 纯前端 Worker（f.182030.xyz）
+// Starlr Forum — 纯前端 Worker（f.182030.xyz）
 //
 // 托管静态资源（frontend-x 构建产物 dist-f，构建时 VITE_API_BASE=https://i.182030.xyz），
 // 无任何 D1/KV/R2 数据绑定；浏览器跨域直连独立后端 forum-backend（i.182030.xyz）。

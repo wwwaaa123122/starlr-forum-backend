@@ -25,7 +25,7 @@ async function spaFallback(c: Context<AppEnv>): Promise<Response> {
   return c.body(null, 404);
 }
 
-const SITE_NAME = '星辰旅人论坛';
+const SITE_NAME = 'Starlr Forum';
 const SITE_TAGLINE = '一个把论坛装进时间线的社区';
 
 // ---------------------------------------------------------------- robots.txt
@@ -158,7 +158,7 @@ app.get('/', async (c) => {
       host: c.req.header('host') ?? cfg.canonical_host,
       cfg,
       meta: {
-        title: `${SITE_NAME} - ${SITE_TAGLINE}`,
+        title: 'Starlr Forum', // 与前端 SPA 首页标题一致
         description: `${SITE_NAME}（${cfg.canonical_host.replace(/^www\./, '')}）：${SITE_TAGLINE}。最新讨论：${posts.slice(0, 3).map((p) => p.title).join('、')}`,
         path: '/',
         jsonLd: [
@@ -235,7 +235,7 @@ app.get('/post/:id', async (c) => {
       host: c.req.header('host') ?? cfg.canonical_host,
       cfg,
       meta: {
-        title: `${row.title} - ${SITE_NAME}`,
+        title: row.title, // 文章页标题就用文章标题（与前端 SPA 一致）
         description: desc,
         path: `/post/${row.id}`,
         jsonLd,

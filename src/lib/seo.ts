@@ -117,7 +117,7 @@ export function renderPage(opts: {
 <meta name="description" content="${safeDescription}" />
 ${robots}
 <link rel="canonical" href="${canonical}" />
-<meta property="og:site_name" content="星辰旅人论坛" />
+<meta property="og:site_name" content="Starlr Forum" />
 <meta property="og:type" content="${ogType}" />
 <meta property="og:title" content="${safeTitle}" />
 <meta property="og:description" content="${safeDescription}" />
@@ -125,7 +125,7 @@ ${robots}
 <meta property="og:locale" content="zh_CN" />
 <meta name="twitter:card" content="summary" />
 ${verifyMetas(cfg, host)}
-<link rel="alternate" type="application/rss+xml" title="星辰旅人论坛" href="${canonicalUrl(cfg, '/feed.xml')}" />
+<link rel="alternate" type="application/rss+xml" title="Starlr Forum" href="${canonicalUrl(cfg, '/feed.xml')}" />
 ${jsonLd}
 </head>
 <body>

@@ -1,4 +1,4 @@
-// 星辰旅人论坛 — 独立后端 API Worker（i.182030.xyz）
+// Starlr Forum — 独立后端 API Worker（i.182030.xyz）
 // 纯 API（不含静态资源）：供外部客户端 / App 直连。
 // 网页端（x.182030.xyz / forum.182030.xyz）由 xingchen-forum-x 自带同源 API，互不影响。
 // 注意：本 Worker 与 xingchen-forum-x 共享同一套 D1/KV/R2 数据，但 JWT 签名密钥各自独立。
@@ -41,7 +41,7 @@
     "PASSWORD_ITERATIONS": "100000",
     "TURNSTILE_SITE_KEY": "0x4AAAAAAFOSQFHmv_Mdvjrg",
     "SSO_ALLOWED_ORIGINS": "https://zako.mom",
-    "MAIL_FROM": "星辰旅人论坛 <no-reply@182030.xyz>",
+    "MAIL_FROM": "Starlr Forum <no-reply@182030.xyz>",
     // 跨域前端白名单（逗号分隔）。f.182030.xyz = 纯前端 Worker，浏览器直连本 API；
     // zako.mom = mc-srv-worker（MC 免端口域名生成器）接入论坛账号系统，浏览器直连本 API 登录。
     "ALLOWED_ORIGINS": "https://f.182030.xyz,https://zako.mom"

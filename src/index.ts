@@ -1,5 +1,5 @@
 /**
- * Starlr Forum（星辰旅人论坛）— Cloudflare Worker 入口
+ * Starlr Forum — Cloudflare Worker 入口
  *
  * 职责分层：
  *   middleware/  认证与权限

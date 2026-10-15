@@ -1,4 +1,4 @@
-// 星辰旅人论坛 — Starlr X 前端 Worker（x.182030.xyz）
+// Starlr Forum — Starlr X 前端 Worker（x.182030.xyz）
 // 与主 Worker（i.182030.xyz，经典版前端）共享同一套 D1/KV/R2 数据与 API 代码，
 // 仅静态资源目录与站点域名不同。
 {
@@ -48,7 +48,7 @@
     "PASSWORD_ITERATIONS": "100000",
     "TURNSTILE_SITE_KEY": "0x4AAAAAAFOSQFHmv_Mdvjrg",
     "SSO_ALLOWED_ORIGINS": "https://zako.mom",
-    "MAIL_FROM": "星辰旅人论坛 <no-reply@182030.xyz>"
+    "MAIL_FROM": "Starlr Forum <no-reply@182030.xyz>"
   },
   // 生产密钥（JWT_SIGNING_KEYS / TURNSTILE_SECRET_KEY）通过 wrangler secret put 注入：
   //   node scripts/generate-jwt-keys.mjs --print | npx wrangler secret put JWT_SIGNING_KEYS -c wrangler.x.jsonc
