@@ -36,6 +36,7 @@ import { RATE_LIMITS, clientFingerprint, consumeRateLimit } from '../lib/rate-li
 import { publicUser } from './auth';
 
 const TICKET_TTL = 120;
+export { TICKET_TTL };
 /** 管理后台维护的 SSO 配置（KV `config:sso`：{ enabled, origins }） */
 export const SSO_KV_KEY = 'config:sso';
 
@@ -47,7 +48,7 @@ export const DEFAULT_SSO_ORIGINS = [
   'http://localhost:8788',
 ];
 
-function normalizeOrigin(value: string | undefined): string {
+export function normalizeOrigin(value: string | undefined): string {
   return (value ?? '').trim().replace(/\/+$/, '');
 }
 
