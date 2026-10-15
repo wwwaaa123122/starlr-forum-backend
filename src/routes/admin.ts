@@ -16,7 +16,6 @@ import { createNotification } from '../lib/notify';
 import { sendEmail } from '../lib/mail';
 import { escapeHtml } from '../lib/markdown';
 import { CATEGORY_CACHE_KEY } from './categories';
-import { RATE_LIMITS, consumeRateLimit } from '../lib/rate-limit';
 
 const app = new Hono<AppEnv>();
 
@@ -701,8 +700,6 @@ const notifySchema = z.object({
 
 app.post('/notifications', requireAdmin, async (c) => {
   const admin = c.get('user')!;
-  const rl = await consumeRateLimit(c.env, RATE_LIMITS.notify, admin.id);
-  if (!rl.ok) throw errors.tooMany('发送过于频繁，请稍后再试');
   const body = await parseJson(c, notifySchema);
 
   let recipients: Array<{ id: string }>;

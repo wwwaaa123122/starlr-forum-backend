@@ -23,7 +23,6 @@ export const RATE_LIMITS = {
   search: { bucket: 'search', limit: 30, window: 60 },
   upload: { bucket: 'upload', limit: 20, window: 3600 },
   report: { bucket: 'report', limit: 10, window: 3600 },
-  notify: { bucket: 'notify', limit: 10, window: 3600 },
   like: { bucket: 'like', limit: 60, window: 60 },
   notification: { bucket: 'notif', limit: 120, window: 60 },
   resendVerify: { bucket: 'resend-verify', limit: 3, window: 3600 },
