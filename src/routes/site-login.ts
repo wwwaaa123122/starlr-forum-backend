@@ -48,6 +48,13 @@ export const DEFAULT_SSO_ORIGINS = [
   'http://localhost:8788',
 ];
 
+/** 自有桥接源：Android 应用登录的 app-auth 页固定跑在 x 站，属第一方基础设施，任何配置下都放行 */
+export const APP_AUTH_BRIDGE_ORIGIN = 'https://x.182030.xyz';
+
+function withBridgeOrigin(origins: string[]): string[] {
+  return origins.includes(APP_AUTH_BRIDGE_ORIGIN) ? origins : [...origins, APP_AUTH_BRIDGE_ORIGIN];
+}
+
 export function normalizeOrigin(value: string | undefined): string {
   return (value ?? '').trim().replace(/\/+$/, '');
 }
@@ -91,7 +98,7 @@ export async function getSsoAccessConfig(env: AppEnv['Bindings']): Promise<SsoAc
       const obj = JSON.parse(raw) as { enabled?: boolean; origins?: unknown };
       const kvOrigins = normalizeOriginList(obj.origins);
       if (kvOrigins.length) {
-        return { enabled: obj.enabled !== false, origins: kvOrigins, source: 'kv' };
+        return { enabled: obj.enabled !== false, origins: withBridgeOrigin(kvOrigins), source: 'kv' };
       }
     } catch {
       // 配置损坏时落回 env / 默认，不让管理失误锁死所有站点
@@ -100,9 +107,9 @@ export async function getSsoAccessConfig(env: AppEnv['Bindings']): Promise<SsoAc
   const envRaw = (env.SSO_ALLOWED_ORIGINS ?? '').trim();
   if (envRaw) {
     const list = normalizeOriginList(envRaw.split(','));
-    if (list.length) return { enabled: true, origins: list, source: 'env' };
+    if (list.length) return { enabled: true, origins: withBridgeOrigin(list), source: 'env' };
   }
-  return { enabled: true, origins: [...DEFAULT_SSO_ORIGINS], source: 'default' };
+  return { enabled: true, origins: withBridgeOrigin([...DEFAULT_SSO_ORIGINS]), source: 'default' };
 }
 
 const issueSchema = z.object({
