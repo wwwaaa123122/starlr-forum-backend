@@ -294,3 +294,14 @@ pnpm test    # vitest + @cloudflare/vitest-pool-workers（真实 workerd + 隔�
 - 邮箱验证：注册后的邮箱所有权验证暂未实现（当前邮件用于欢迎/重置/告警）
 - 限流为 KV 基础防护，建议叠加 Cloudflare WAF Rate Limiting 规则
 - 搜索的 FTS5 trigram 需要 ≥3 字符关键词，短词自动回退 LIKE
+
+## 开源协议
+
+本项目基于 [GPL-3.0-or-later](./LICENSE) 协议开源。
+
+- 你可以自由使用、学习、修改和分发本项目代码；
+- 任何基于本项目的二次开发作品，必须同样以 GPL-3.0 协议开源，并保留原始版权声明；
+- 本项目按「现状」提供，不附带任何担保；
+- 版权所有 © 2026 wwwaaa123122 (星辰旅人)。
+
+Starlr Forum 是一个运行在 Cloudflare Workers 上的轻量级论坛系统（D1 数据库 + R2 存储 + React 前端 + Android 客户端）。
