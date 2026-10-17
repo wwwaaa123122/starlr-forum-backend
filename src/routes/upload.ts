@@ -87,9 +87,36 @@ uploadRoutes.post('/', requireAuth, requireVerified, async (c) => {
   const d = new Date();
   const key = `uploads/${user.id}/${d.getUTCFullYear()}/${String(d.getUTCMonth() + 1).padStart(2, '0')}/${newId(20)}.${ext}`;
 
-  // 头像：直接存 KV（小图、单值覆盖、按 uid 读取）；帖子/回复图片：存 R2
+  // 存储后端选择（S3 开启时头像/背景图/文章/评论图片全部上 S3；默认 KV+R2 零配置）
+  const setupAll = await getSetupConfig(c.env);
+  const s3cfgAll = setupAll.uploadsStorage === 's3' ? await getS3Config(c.env) : null;
+
+  // 头像：S3 开启 → 上传 S3；否则 KV（小图、单值覆盖、按 uid 读取）
   if (purpose === 'avatar') {
     if (file.size > 2 * 1024 * 1024) throw errors.badRequest('头像最大 2MB', 'FILE_TOO_LARGE');
+    if (s3cfgAll) {
+      const res = await s3Request(c.env, 'PUT', key, '', bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+      if (!res.ok) throw errors.internal(`S3 上传失败（HTTP ${res.status}）`);
+      const avatarUrl = s3cfgAll.public_base_url
+        ? `${s3cfgAll.public_base_url.replace(/\/$/, '')}/${key}`
+        : `/api/files/${key}`;
+      await c.env.DB.prepare(`UPDATE users SET avatar_url = ?, updated_at = ? WHERE id = ?`)
+        .bind(avatarUrl, nowIso(), user.id)
+        .run();
+      await c.env.CACHE.put(quotaKey, String(used + 1), { expirationTtl: 86_400 });
+      return ok(
+        c,
+        {
+          url: avatarUrl,
+          mimeType: mime,
+          size: file.size,
+          purpose,
+          avatarUpdated: true,
+          quotaRemaining: Math.max(0, DAILY_UPLOAD_QUOTA - (used + 1)),
+        },
+        { status: 201 },
+      );
+    }
     const avatarKey = `avatar:${user.uid ?? user.id}`; // 与 /api/avatars/:uid 读取键保持一致
     const avatarUrl = `/api/avatars/${user.uid ?? user.id}?v=${Date.now()}`;
     await c.env.CACHE.put(avatarKey, bytes, {
@@ -113,15 +140,11 @@ uploadRoutes.post('/', requireAuth, requireVerified, async (c) => {
     );
   }
 
-  // 存储后端选择：setup.uploads_storage = 's3' 且已配置 S3 → 上传 S3；否则 R2 绑定（默认）
-  const setup = await getSetupConfig(c.env);
-  const s3cfg = setup.uploadsStorage === 's3' ? await getS3Config(c.env) : null;
-
   let url: string;
-  if (s3cfg) {
+  if (s3cfgAll) {
     const res = await s3Request(c.env, 'PUT', key, '', bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
     if (!res.ok) throw errors.internal(`S3 上传失败（HTTP ${res.status}）`);
-    url = s3cfg.public_base_url ? `${s3cfg.public_base_url.replace(/\/$/, '')}/${key}` : `/api/files/${key}`;
+    url = s3cfgAll.public_base_url ? `${s3cfgAll.public_base_url.replace(/\/$/, '')}/${key}` : `/api/files/${key}`;
   } else {
     await c.env.UPLOADS.put(key, bytes, {
       httpMetadata: { contentType: mime, cacheControl: 'public, max-age=31536000, immutable' },
