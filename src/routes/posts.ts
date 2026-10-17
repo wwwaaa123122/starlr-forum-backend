@@ -101,7 +101,7 @@ app.get('/', async (c) => {
             p.favorite_count AS favoriteCount, p.created_at AS createdAt, p.updated_at AS updatedAt,
             p.last_reply_at AS lastReplyAt,
             substr(p.content, 1, 200) AS excerpt,
-            u.id AS authorId, u.uid AS authorUid, u.username_raw AS authorName, u.nickname AS authorNickname, u.avatar_url AS authorAvatar,
+            u.id AS authorId, u.uid AS authorUid, u.username_raw AS authorName, u.nickname AS authorNickname, u.avatar_url AS authorAvatar, u.role AS authorRole,
             c.id AS categoryId, c.name AS categoryName, c.slug AS categorySlug
      ${baseFrom}
      WHERE ${where.join(' AND ')}
