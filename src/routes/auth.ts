@@ -15,6 +15,7 @@ import { verifyTurnstile } from '../lib/turnstile';
 import { sessionInfoFrom } from '../lib/session-info';
 import { requireAuth } from '../middleware/auth';
 import { writeAuditLog } from '../lib/audit';
+import { getSetupConfig, isFirstUser } from '../lib/setup';
 import { sendVerificationEmail, createEmailVerificationToken, consumeEmailVerificationToken, consumePasswordResetToken, createPasswordResetToken, sendEmail } from '../lib/mail';
 
 const app = new Hono<AppEnv>();
@@ -31,7 +32,7 @@ const emailSchema = z.string().trim().toLowerCase().email('邮箱格式不正确
 
 const registerSchema = z.object({
   username: usernameSchema,
-  email: emailSchema,
+  email: emailSchema.optional(),
   password: passwordSchema,
   nickname: z.string().trim().min(1).max(24).optional(),
   turnstileToken: z.string().optional(),
@@ -88,19 +89,38 @@ app.post('/register', async (c) => {
   const strength = isStrongEnough(body.password);
   if (!strength.ok) throw errors.badRequest(strength.reason ?? '密码强度不足', 'WEAK_PASSWORD');
 
+  const setupPre = await getSetupConfig(c.env);
+  if (setupPre.emailRequired) {
+    const parsedEmail = emailSchema.safeParse(body.email);
+    if (!parsedEmail.success) throw errors.badRequest('请输入有效的邮箱地址', 'VALIDATION_ERROR');
+  }
+
   const turnstile = await verifyTurnstile(c.env, body.turnstileToken, c.req.header('cf-connecting-ip'));
   if (!turnstile.success) {
     throw errors.badRequest('人机校验失败，请刷新页面重试', 'TURNSTILE_FAILED');
   }
 
-  const usernameLower = body.username.toLowerCase();
-  const email = body.email.toLowerCase();
+  const setup = await getSetupConfig(c.env);
+  if (!setup.registrationEnabled) {
+    throw errors.forbidden('本站已关闭注册', 'REGISTRATION_CLOSED');
+  }
 
-  const existing = await c.env.DB.prepare(
-    `SELECT id, username, email FROM users WHERE username = ? OR email = ? LIMIT 1`,
-  )
-    .bind(usernameLower, email)
-    .first<{ id: string; username: string; email: string }>();
+  const usernameLower = body.username.toLowerCase();
+  // 无邮箱注册模式：存合成占位地址（uid 分配后生成），保持 NOT NULL + 唯一约束；登录按 username 走
+  const email = setup.emailRequired && body.email ? body.email.toLowerCase() : null;
+
+  // 用户名查重（无邮箱模式下仅查用户名）
+  const existing = setup.emailRequired
+    ? await c.env.DB.prepare(
+        `SELECT id FROM users WHERE username = ? OR email = ? LIMIT 1`,
+      )
+        .bind(usernameLower, email)
+        .first<{ id: string }>()
+    : await c.env.DB.prepare(
+        `SELECT id FROM users WHERE username = ? LIMIT 1`,
+      )
+        .bind(usernameLower)
+        .first<{ id: string }>();
   if (existing) throw errors.conflict(CONFLICT_MESSAGE, 'USER_EXISTS');
 
   const iterations = Number.parseInt(c.env.PASSWORD_ITERATIONS ?? '100000', 10) || 100000;
@@ -122,23 +142,29 @@ app.post('/register', async (c) => {
       .run();
   }
 
+  // 首个注册用户自动成为管理员（站点初始化）
+  const first = await isFirstUser(c.env);
+  const role = first ? 'admin' : 'user';
+
   try {
     await c.env.DB.prepare(
       `INSERT INTO users (id, uid, username, username_raw, email, password_hash, nickname, role, status, email_verified, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'user', 'active', 0, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)`,
     )
-      .bind(userId, uid, usernameLower, body.username, email, passwordHash, nickname, nowIso(), nowIso())
+      .bind(userId, uid, usernameLower, body.username, email ?? `noemail-${userId}@users.invalid`, passwordHash, nickname, role, first || !setup.emailRequired ? 1 : 0, nowIso(), nowIso())
       .run();
   } catch {
     // 并发注册触发唯一约束
     throw errors.conflict(CONFLICT_MESSAGE, 'USER_EXISTS');
   }
 
-  // 激活邮件（失败不影响注册；用户可在设置页重新发送）
-  const verifyToken = await createEmailVerificationToken(c.env, userId);
-  await sendVerificationEmail(c.env, email, nickname, verifyToken);
+  // 激活邮件（失败不影响注册；用户可在设置页重新发送）。无邮箱模式跳过
+  if (setup.emailRequired && email) {
+    const verifyToken = await createEmailVerificationToken(c.env, userId);
+    await sendVerificationEmail(c.env, email, nickname, verifyToken);
+  }
 
-  const tokens = await issueTokens(c.env, { id: userId, role: 'user' }, deviceInfoFrom(c));
+  const tokens = await issueTokens(c.env, { id: userId, role }, deviceInfoFrom(c));
   await writeAuditLog(c, { action: 'user.register', targetType: 'user', targetId: userId, actorId: userId });
 
   return ok(
@@ -150,11 +176,12 @@ app.post('/register', async (c) => {
         username: usernameLower,
         username_raw: body.username,
         nickname,
-        role: 'user',
+        role,
+        email,
         post_count: 0,
         reply_count: 0,
         created_at: nowIso(),
-        email_verified: 0,
+        email_verified: first || !setup.emailRequired ? 1 : 0,
         status: 'active',
       }),
       ...tokens,

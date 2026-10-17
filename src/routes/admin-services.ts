@@ -8,6 +8,7 @@ import type { AppEnv } from '../types';
 import { errors, ok } from '../lib/http';
 import { parseJson } from '../lib/validate';
 import { requireRole } from '../middleware/auth';
+import { getSetupConfig, writeSetupConfig } from '../lib/setup';
 import { writeAuditLog } from '../lib/audit';
 import { SERVICES, serviceDef, getServiceRaw, putServiceRaw, deleteServiceRaw, describeService } from '../lib/service-config';
 import { s3Test } from '../lib/s3';
@@ -180,3 +181,42 @@ app.post('/:key/test', async (c) => {
 });
 
 export default app;
+
+// ---------------------------------------------------------------
+// 站点初始化配置（/api/admin/setup）
+// ---------------------------------------------------------------
+app.get('/setup', async (c) => {
+  const cfg = await getSetupConfig(c.env);
+  return ok(c, {
+    setup: {
+      registration_enabled: cfg.registrationEnabled,
+      registration_email_required: cfg.emailRequired,
+      uploads_storage: cfg.uploadsStorage,
+    },
+  });
+});
+
+const setupSchema = z.object({
+  registration_enabled: z.boolean().optional(),
+  registration_email_required: z.boolean().optional(),
+  uploads_storage: z.enum(['r2', 's3']).optional(),
+});
+
+app.patch('/setup', async (c) => {
+  const admin = c.get('user')!;
+  const body = await parseJson(c, setupSchema);
+  await writeSetupConfig(c.env, {
+    registrationEnabled: body.registration_enabled,
+    emailRequired: body.registration_email_required,
+    uploadsStorage: body.uploads_storage,
+  });
+  const cfg = await getSetupConfig(c.env);
+  await writeAuditLog(c, { action: 'admin.setup.update', targetType: 'setup', targetId: 'config:setup', actorId: admin.id });
+  return ok(c, {
+    setup: {
+      registration_enabled: cfg.registrationEnabled,
+      registration_email_required: cfg.emailRequired,
+      uploads_storage: cfg.uploadsStorage,
+    },
+  });
+});

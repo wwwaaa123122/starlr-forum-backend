@@ -250,7 +250,47 @@ pnpm test             # 自动化测试（113 个用例）
 wrangler secret put TURNSTILE_SECRET_KEY   # Turnstile widget secret
 ```
 
+## 初始化与站点配置
+
+### 首个用户自动成为管理员
+
+**全新部署后第一个注册的账号会自动成为管理员（admin）**，无需手动提权。这是站点初始化的推荐路径：
+
+1. 按「部署（Cloudflare）」章节完成部署；
+2. 打开网站注册页，注册你的账号——该账号自动获得 admin 角色、邮箱视为已验证；
+3. 用该账号登录管理后台（/admin）进行后续配置。
+
+已有用户的站点不受影响（判断依据是注册时用户表是否为空）。
+
+### 站点初始化开关（管理后台 → 服务配置 → 站点初始化）
+
+通过 `GET/PATCH /api/admin/services/setup`（管理后台可视化）或直接写 KV `config:setup` 配置：
+
+| 配置项 | 默认 | 说明 |
+|---|---|---|
+| `registration_enabled` | `true` | 是否开放注册；关闭后注册接口返回 403 |
+| `registration_email_required` | `true` | 注册是否必须邮箱。**关闭后 = 用户名 + 密码直接注册**（无验证邮件，账号直接激活；邮箱字段存合成占位地址，登录走用户名） |
+| `uploads_storage` | `r2` | 图片存储后端。`r2` = Worker 绑定的 R2（零配置默认）；`s3` = 使用「服务配置 → S3 兼容存储」里配置的 S3 端点 |
+
+### S3 兼容存储（可选）
+
+默认图片（文章插图、回复图片、头像、背景图、板块图标）存 R2，经 `/api/files/*` 同源读取，零配置。
+
+若你想用外部 S3 兼容存储（AWS S3 / Backblaze B2 / 阿里云 OSS 等）：
+
+1. 管理后台 → 服务配置 → S3 兼容存储：填 Endpoint / Region / Bucket / AccessKey / SecretKey（可选 `public_base_url` 直链域名），点「测试连通」；
+2. 服务配置 → 站点初始化 → `uploads_storage` 改为 `s3`；
+3. 生效后文章图片、回复图片、背景图、板块图标上传至 S3（头像仍存 KV，经 `/api/avatars/:uid` 读取）；若配置了 `public_base_url`，返回的 URL 为 S3 直链，否则仍走 `/api/files/*` 代理路径。
+
+### 其他可选开关
+
+- **Turnstile**（推荐生产开启）：见下方「Turnstile」章节；
+- **邮件（Resend）**：见「服务配置 → 邮件」，未配置时验证邮件静默跳过；
+- **GitHub OAuth 登录**：见「服务配置 → GitHub OAuth」。
+
 ## 提升管理员
+
+> 全新部署无需此步骤——第一个注册的账号自动成为管理员。仅当需要追加更多管理员时使用。
 
 注册目标账号后：
 

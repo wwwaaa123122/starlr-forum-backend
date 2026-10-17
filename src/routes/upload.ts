@@ -10,6 +10,8 @@ import { errors, ok } from '../lib/http';
 import { requireAuth, requireVerified, assertNotMuted } from '../middleware/auth';
 import { RATE_LIMITS, consumeRateLimit } from '../lib/rate-limit';
 import { newId, nowIso } from '../lib/ids';
+import { getSetupConfig } from '../lib/setup';
+import { getS3Config, s3Request } from '../lib/s3';
 
 const uploadRoutes = new Hono<AppEnv>();
 const fileRoutes = new Hono<AppEnv>();
@@ -111,9 +113,21 @@ uploadRoutes.post('/', requireAuth, requireVerified, async (c) => {
     );
   }
 
-  await c.env.UPLOADS.put(key, bytes, {
-    httpMetadata: { contentType: mime, cacheControl: 'public, max-age=31536000, immutable' },
-  });
+  // 存储后端选择：setup.uploads_storage = 's3' 且已配置 S3 → 上传 S3；否则 R2 绑定（默认）
+  const setup = await getSetupConfig(c.env);
+  const s3cfg = setup.uploadsStorage === 's3' ? await getS3Config(c.env) : null;
+
+  let url: string;
+  if (s3cfg) {
+    const res = await s3Request(c.env, 'PUT', key, '', bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+    if (!res.ok) throw errors.internal(`S3 上传失败（HTTP ${res.status}）`);
+    url = s3cfg.public_base_url ? `${s3cfg.public_base_url.replace(/\/$/, '')}/${key}` : `/api/files/${key}`;
+  } else {
+    await c.env.UPLOADS.put(key, bytes, {
+      httpMetadata: { contentType: mime, cacheControl: 'public, max-age=31536000, immutable' },
+    });
+    url = `/api/files/${key}`;
+  }
 
   const attachmentId = newId(16);
   await c.env.DB.prepare(
@@ -130,7 +144,7 @@ uploadRoutes.post('/', requireAuth, requireVerified, async (c) => {
     {
       id: attachmentId,
       key,
-      url: `/api/files/${key}`,
+      url,
       mimeType: mime,
       size: file.size,
       purpose,
