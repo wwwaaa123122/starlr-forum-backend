@@ -150,8 +150,10 @@ app.get('/:username/replies', async (c) => {
     .first<{ total: number }>();
   const { results } = await c.env.DB.prepare(
     `SELECT r.id, r.content, r.created_at AS createdAt, r.post_id AS postId,
-            p.title AS postTitle, p.is_deleted AS postDeleted
-     FROM replies r JOIN posts p ON p.id = r.post_id
+            p.title AS postTitle, p.is_deleted AS postDeleted,
+            u.username_raw AS authorName, u.nickname AS authorNickname,
+            u.avatar_url AS authorAvatar, u.uid AS authorUid
+     FROM replies r JOIN posts p ON p.id = r.post_id JOIN users u ON u.id = r.author_id
      WHERE r.author_id = ? AND r.is_deleted = 0 AND p.is_deleted = 0
      ORDER BY r.created_at DESC LIMIT ? OFFSET ?`,
   )
