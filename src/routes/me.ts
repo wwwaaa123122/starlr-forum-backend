@@ -153,7 +153,8 @@ app.get('/favorites', async (c) => {
 
   const { results } = await c.env.DB.prepare(
     `SELECT p.id, p.title, substr(p.content, 1, 200) AS excerpt, p.view_count AS viewCount,
-            p.reply_count AS replyCount, p.like_count AS likeCount, p.is_pinned AS isPinned, p.is_featured AS isFeatured,
+            p.reply_count AS replyCount, p.like_count AS likeCount, p.favorite_count AS favoriteCount,
+            p.is_pinned AS isPinned, p.is_featured AS isFeatured,
             p.created_at AS createdAt, p.last_reply_at AS lastReplyAt, f.created_at AS favoritedAt,
             u.username_raw AS authorName, u.nickname AS authorNickname, u.id AS authorId, u.uid AS authorUid, u.avatar_url AS authorAvatar,
             c.name AS categoryName, c.slug AS categorySlug
@@ -220,7 +221,8 @@ app.get('/likes', async (c) => {
 
   const { results } = await c.env.DB.prepare(
     `SELECT p.id, p.title, substr(p.content, 1, 200) AS excerpt, p.view_count AS viewCount,
-            p.reply_count AS replyCount, p.like_count AS likeCount, p.is_pinned AS isPinned, p.is_featured AS isFeatured,
+            p.reply_count AS replyCount, p.like_count AS likeCount, p.favorite_count AS favoriteCount,
+            p.is_pinned AS isPinned, p.is_featured AS isFeatured,
             p.created_at AS createdAt, p.last_reply_at AS lastReplyAt, l.created_at AS likedAt,
             u.username_raw AS authorName, u.nickname AS authorNickname, u.id AS authorId, u.uid AS authorUid, u.avatar_url AS authorAvatar,
             c.name AS categoryName, c.slug AS categorySlug

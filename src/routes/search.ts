@@ -75,8 +75,10 @@ async function searchPostsByLike(
     .first<{ total: number }>();
   const { results } = await env.DB.prepare(
     `SELECT p.id, p.title, substr(p.content, 1, 200) AS excerpt,
-            p.reply_count AS replyCount, p.like_count AS likeCount, p.created_at AS createdAt,
-            u.id AS authorId, u.username_raw AS authorName, u.nickname AS authorNickname, u.avatar_url AS authorAvatar,
+            p.reply_count AS replyCount, p.like_count AS likeCount, p.view_count AS viewCount,
+            p.favorite_count AS favoriteCount, p.is_pinned AS isPinned, p.is_featured AS isFeatured,
+            p.created_at AS createdAt, p.last_reply_at AS lastReplyAt, p.updated_at AS updatedAt, p.category_id AS categoryId,
+            u.id AS authorId, u.username_raw AS authorName, u.nickname AS authorNickname, u.avatar_url AS authorAvatar, u.uid AS authorUid, u.role AS authorRole,
             c.name AS categoryName, c.slug AS categorySlug
      ${baseFrom} WHERE ${conditions.join(' AND ')}
      ORDER BY p.last_reply_at DESC LIMIT ? OFFSET ?`,
@@ -150,8 +152,10 @@ app.get('/', async (c) => {
       const orderBy = sort === 'new' ? 'p.created_at DESC' : 'rank';
       const { results } = await c.env.DB.prepare(
         `SELECT p.id, p.title, substr(p.content, 1, 200) AS excerpt,
-                p.reply_count AS replyCount, p.like_count AS likeCount, p.created_at AS createdAt,
-                u.id AS authorId, u.username_raw AS authorName, u.nickname AS authorNickname, u.avatar_url AS authorAvatar,
+                p.reply_count AS replyCount, p.like_count AS likeCount, p.view_count AS viewCount,
+                p.favorite_count AS favoriteCount, p.is_pinned AS isPinned, p.is_featured AS isFeatured,
+                p.created_at AS createdAt, p.last_reply_at AS lastReplyAt, p.updated_at AS updatedAt, p.category_id AS categoryId,
+                u.id AS authorId, u.username_raw AS authorName, u.nickname AS authorNickname, u.avatar_url AS authorAvatar, u.uid AS authorUid, u.role AS authorRole,
                 c.name AS categoryName, c.slug AS categorySlug
          ${baseFrom} WHERE ${conditions.join(' AND ')}
          ORDER BY ${orderBy} LIMIT ? OFFSET ?`,

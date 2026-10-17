@@ -89,7 +89,8 @@ app.get('/:username/likes', async (c) => {
 
   const { results } = await c.env.DB.prepare(
     `SELECT p.id, p.title, substr(p.content, 1, 200) AS excerpt, p.view_count AS viewCount,
-            p.reply_count AS replyCount, p.like_count AS likeCount, p.is_pinned AS isPinned, p.is_featured AS isFeatured,
+            p.reply_count AS replyCount, p.like_count AS likeCount, p.favorite_count AS favoriteCount,
+            p.is_pinned AS isPinned, p.is_featured AS isFeatured,
             p.created_at AS createdAt, p.last_reply_at AS lastReplyAt, l.created_at AS likedAt,
             u.username_raw AS authorName, u.nickname AS authorNickname, u.id AS authorId, u.uid AS authorUid, u.avatar_url AS authorAvatar,
             c.name AS categoryName, c.slug AS categorySlug
@@ -121,9 +122,11 @@ app.get('/:username/posts', async (c) => {
   const { results } = await c.env.DB.prepare(
     `SELECT p.id, p.title, substr(p.content, 1, 160) AS excerpt,
             p.reply_count AS replyCount, p.like_count AS likeCount, p.view_count AS viewCount,
-            p.created_at AS createdAt, p.is_pinned AS isPinned, p.is_featured AS isFeatured,
+            p.favorite_count AS favoriteCount, p.created_at AS createdAt,
+            p.last_reply_at AS lastReplyAt,
+            p.is_pinned AS isPinned, p.is_featured AS isFeatured,
             c.name AS categoryName, c.slug AS categorySlug,
-            u.username_raw AS authorName, u.nickname AS authorNickname,
+            u.id AS authorId, u.username_raw AS authorName, u.nickname AS authorNickname,
             u.avatar_url AS authorAvatar, u.uid AS authorUid, u.role AS authorRole
      FROM posts p
      JOIN categories c ON c.id = p.category_id
@@ -151,9 +154,13 @@ app.get('/:username/replies', async (c) => {
   const { results } = await c.env.DB.prepare(
     `SELECT r.id, r.content, r.created_at AS createdAt, r.post_id AS postId,
             p.title AS postTitle, p.is_deleted AS postDeleted,
+            r.like_count AS likeCount, r.edited_at AS editedAt,
+            r.author_id AS authorId,
+            ru.username_raw AS replyToUserName,
             u.username_raw AS authorName, u.nickname AS authorNickname,
-            u.avatar_url AS authorAvatar, u.uid AS authorUid
+            u.avatar_url AS authorAvatar, u.uid AS authorUid, u.role AS authorRole
      FROM replies r JOIN posts p ON p.id = r.post_id JOIN users u ON u.id = r.author_id
+     LEFT JOIN users ru ON ru.id = r.reply_to_user_id
      WHERE r.author_id = ? AND r.is_deleted = 0 AND p.is_deleted = 0
      ORDER BY r.created_at DESC LIMIT ? OFFSET ?`,
   )
