@@ -110,10 +110,10 @@ app.post('/prepare', async (c) => {
     // 统一错误信息避免用户名枚举；无用户时仍执行一次哈希校验以均衡时序（与 /login 一致）
     if (!user) {
       await verifyPassword(body.password, 'pbkdf2$sha256$100000$AAAA$AAAA');
-      throw errors.unauthorized('用户名或密码错误', 'INVALID_CREDENTIALS');
+      throw errors.unauthorized('用户名（邮箱）或密码错误', 'INVALID_CREDENTIALS');
     }
     if (!(await verifyPassword(body.password, user.password_hash))) {
-      throw errors.unauthorized('用户名或密码错误', 'INVALID_CREDENTIALS');
+      throw errors.unauthorized('用户名（邮箱）或密码错误', 'INVALID_CREDENTIALS');
     }
     if (user.status === 'banned') throw errors.forbidden('账号已被封禁', 'ACCOUNT_BANNED');
 

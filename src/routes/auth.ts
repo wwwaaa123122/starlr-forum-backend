@@ -192,10 +192,10 @@ app.post('/login', async (c) => {
   // 统一错误信息，避免用户名枚举；无用户时仍执行一次哈希校验以均衡时序
   if (!user) {
     await verifyPassword(body.password, 'pbkdf2$sha256$100000$AAAA$AAAA');
-    throw errors.unauthorized('用户名或密码错误', 'INVALID_CREDENTIALS');
+    throw errors.unauthorized('用户名（邮箱）或密码错误', 'INVALID_CREDENTIALS');
   }
   const passwordOk = await verifyPassword(body.password, user.password_hash);
-  if (!passwordOk) throw errors.unauthorized('用户名或密码错误', 'INVALID_CREDENTIALS');
+  if (!passwordOk) throw errors.unauthorized('用户名（邮箱）或密码错误', 'INVALID_CREDENTIALS');
 
   if (user.status === 'banned') {
     const ban = await c.env.DB.prepare(
