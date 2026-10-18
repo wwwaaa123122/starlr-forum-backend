@@ -44,15 +44,16 @@ app.use('*', async (c, next) => {
   await next();
 });
 
-// www → 根域 301：同一内容只保留一个规范域名（canonical 与 sitemap 都用根域），
-// 避免搜索引擎把 www 与根域当成两个站点。API 路径不跳转（POST 301 会丢请求体）。
+// www → 根域：同一内容只保留一个规范域名（canonical 与 sitemap 都用根域）。
+// 用 **302 临时重定向**（不用 301）：域名策略可能随时调整，301 会被浏览器/爬虫长期缓存，
+// 改回来很麻烦。API 路径不跳转（重定向会改变方法、丢请求体）。
 app.use('*', async (c, next) => {
   const url = new URL(c.req.url);
   const isRead = c.req.method === 'GET' || c.req.method === 'HEAD';
   const isApiLike = url.pathname.startsWith('/api/') || url.pathname.startsWith('/.well-known/') || url.pathname.startsWith('/oauth/');
   if (isRead && !isApiLike && url.hostname.startsWith('www.')) {
     url.hostname = url.hostname.slice(4);
-    return c.redirect(url.toString(), 301);
+    return c.redirect(url.toString(), 302);
   }
   await next();
 });
