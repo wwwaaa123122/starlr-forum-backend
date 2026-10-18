@@ -15,24 +15,24 @@ export interface SetupConfig {
 
 const KV_KEY = 'config:setup';
 
-const DEFAULTS: SetupConfig = {
-  registrationEnabled: true,
-  emailRequired: true,
-  uploadsStorage: 'r2',
+const DEFAULT_SETUP: SetupConfig = {
+  registrationEnabled: defaults.setup.registration_enabled,
+  emailRequired: defaults.setup.registration_email_required,
+  uploadsStorage: defaults.setup.uploads_storage as 'r2' | 's3',
 };
 
 export async function getSetupConfig(env: Env): Promise<SetupConfig> {
   try {
     const raw = await env.CACHE.get(KV_KEY);
-    if (!raw) return { ...DEFAULTS };
+    if (!raw) return { ...DEFAULT_SETUP };
     const cfg = JSON.parse(raw) as Record<string, unknown>;
     return {
-      registrationEnabled: cfg.registration_enabled === undefined ? DEFAULTS.registrationEnabled : cfg.registration_enabled === true || cfg.registration_enabled === 'true',
-      emailRequired: cfg.registration_email_required === undefined ? DEFAULTS.emailRequired : cfg.registration_email_required === true || cfg.registration_email_required === 'true',
+      registrationEnabled: cfg.registration_enabled === undefined ? DEFAULT_SETUP.registrationEnabled : cfg.registration_enabled === true || cfg.registration_enabled === 'true',
+      emailRequired: cfg.registration_email_required === undefined ? DEFAULT_SETUP.emailRequired : cfg.registration_email_required === true || cfg.registration_email_required === 'true',
       uploadsStorage: cfg.uploads_storage === 's3' ? 's3' : 'r2',
     };
   } catch {
-    return { ...DEFAULTS };
+    return { ...DEFAULT_SETUP };
   }
 }
 
@@ -62,12 +62,12 @@ export interface SiteInfo {
 
 const SITE_KV_KEY = 'config:site';
 
-export const DEFAULT_SITE: SiteInfo = {
-  siteName: 'Starlr Forum',
-  siteTagline: '一个轻量、现代的社区论坛',
-  siteDescription: '一个运行在 Cloudflare 上的轻量级社区。',
-  siteFooter: '© Starlr Forum',
-};
+import defaults from '../config/defaults.json';
+
+/** 所有默认配置集中在 src/config/defaults.json，自部署者直接改该文件 */
+export const DEFAULTS = defaults;
+
+export const DEFAULT_SITE: SiteInfo = defaults.site;
 
 export async function getSiteInfo(env: Env): Promise<SiteInfo> {
   try {

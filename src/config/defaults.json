@@ -1,0 +1,26 @@
+{
+  "site": {
+    "siteName": "Starlr Forum",
+    "siteTagline": "一个轻量、现代的社区论坛",
+    "siteDescription": "一个运行在 Cloudflare 上的轻量级社区。",
+    "siteFooter": "© Starlr Forum"
+  },
+  "setup": {
+    "registration_enabled": true,
+    "registration_email_required": true,
+    "uploads_storage": "r2"
+  },
+  "seo": {
+    "canonicalHost": "forum.182030.xyz",
+    "siteTagline": "一个轻量、现代的社区论坛"
+  },
+  "mail": {
+    "fromFallback": "Starlr Forum <no-reply@users.invalid>"
+  },
+  "app": {
+    "versionCode": 0,
+    "versionName": "0.0.0",
+    "downloadUrl": "",
+    "changelog": ""
+  }
+}

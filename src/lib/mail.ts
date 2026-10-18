@@ -7,6 +7,7 @@
 import type { Env } from '../types';
 import { sha256Hex } from './ids';
 import { getSiteInfo } from './setup';
+import { mailFromFallback } from '../config/defaults';
 
 export interface SentEmail {
   to: string[];
@@ -102,16 +103,16 @@ export async function getMailAccounts(env: Env): Promise<MailAccount[]> {
       const cfg = JSON.parse(raw) as { accounts?: { api_key?: string; from?: string }[]; api_key?: string; from?: string };
       // 新结构：accounts 数组
       for (const a of cfg.accounts ?? []) {
-        if (a.api_key && a.api_key !== '-') list.push({ api_key: a.api_key, from: a.from || env.MAIL_FROM || 'Starlr Forum <no-reply@users.invalid>', source: 'kv' });
+        if (a.api_key && a.api_key !== '-') list.push({ api_key: a.api_key, from: a.from || env.MAIL_FROM || mailFromFallback, source: 'kv' });
       }
       // 旧单账号结构兼容
-      if (!cfg.accounts && cfg.api_key) list.push({ api_key: cfg.api_key, from: cfg.from || env.MAIL_FROM || 'Starlr Forum <no-reply@users.invalid>', source: 'kv' });
+      if (!cfg.accounts && cfg.api_key) list.push({ api_key: cfg.api_key, from: cfg.from || env.MAIL_FROM || mailFromFallback, source: 'kv' });
     }
   } catch {
     /* KV 异常时用 env 兜底 */
   }
   if (env.RESEND_API_KEY) {
-    list.push({ api_key: env.RESEND_API_KEY, from: env.MAIL_FROM || 'Starlr Forum <no-reply@users.invalid>', source: 'env' });
+    list.push({ api_key: env.RESEND_API_KEY, from: env.MAIL_FROM || mailFromFallback, source: 'env' });
   }
   return list;
 }

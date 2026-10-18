@@ -21,7 +21,9 @@ export interface SeoConfig {
 }
 
 /** 未在管理后台配置 canonical_host 时的兜底值；自部署者应在后台「SEO/服务配置」里填自己的域名 */
-export const DEFAULT_CANONICAL_HOST = 'forum.182030.xyz';
+import defaults from '../config/defaults.json';
+
+export const DEFAULT_CANONICAL_HOST = defaults.seo.canonicalHost;
 
 function defaultHost(env: Env): string {
   if (env.SITE_URL) {
