@@ -7,7 +7,10 @@
   "main": "src/index.ts",
   "routes": [
     { "pattern": "x.182030.xyz", "custom_domain": true },
-    { "pattern": "forum.182030.xyz", "custom_domain": true }
+    { "pattern": "forum.182030.xyz", "custom_domain": true },
+    // 新品牌域名（同一 Worker 承载，与 forum.182030.xyz 同内容）
+    { "pattern": "starlr.tech", "custom_domain": true },
+    { "pattern": "www.starlr.tech", "custom_domain": true }
   ],
   "compatibility_date": "2025-10-01",
   "compatibility_flags": ["nodejs_compat"],
@@ -40,15 +43,18 @@
     "enabled": true
   },
   "vars": {
-    "SITE_URL": "https://x.182030.xyz",
-    "JWT_ISSUER": "https://x.182030.xyz",
+    // 主站地址：邮件链接、OAuth 回跳、APP 协议链接都以它为准
+    "SITE_URL": "https://starlr.tech",
+    "JWT_ISSUER": "https://x.182030.xyz",   // 保持不变：改了会让所有已登录用户掉线
+    // Android 客户端浏览器登录桥接页仍在 x 站（APK 内置地址），不要跟着 SITE_URL 变
+    "APP_AUTH_ORIGIN": "https://x.182030.xyz",
     "JWT_AUDIENCE": "api",
     "ACCESS_TOKEN_TTL": "1800",
     "REFRESH_TOKEN_TTL": "2592000",
     "PASSWORD_ITERATIONS": "100000",
     "TURNSTILE_SITE_KEY": "0x4AAAAAAFOSQFHmv_Mdvjrg",
     "SSO_ALLOWED_ORIGINS": "https://zako.mom,https://x.182030.xyz",
-    "OAUTH_REDIRECT_ORIGINS": "https://x.182030.xyz,https://forum.182030.xyz,https://f.182030.xyz",
+    "OAUTH_REDIRECT_ORIGINS": "https://x.182030.xyz,https://forum.182030.xyz,https://f.182030.xyz,https://starlr.tech,https://www.starlr.tech",
     "MAIL_FROM": "Starlr Forum <no-reply@182030.xyz>"
   },
   // 生产密钥（JWT_SIGNING_KEYS / TURNSTILE_SECRET_KEY）通过 wrangler secret put 注入：

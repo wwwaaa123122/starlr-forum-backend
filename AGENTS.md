@@ -7,7 +7,7 @@ Hono + Cloudflare Workers + TypeScript 后端。**一套源码，四个部署目
 | 配置文件 | Worker | 用途 | 部署命令 |
 |---|---|---|---|
 | `wrangler.jsonc` | （无 name routes） | **仅 `wrangler dev` 本地开发**，assets 指 `../frontend/dist` | `npx wrangler dev` |
-| `wrangler.x.jsonc` | `xingchen-forum-x` | x.182030.xyz + forum.182030.xyz：frontend-x 静态资源 + 同源 API | `npx wrangler deploy -c wrangler.x.jsonc` |
+| `wrangler.x.jsonc` | `xingchen-forum-x` | **starlr.tech（主站）+ www.starlr.tech** + x.182030.xyz + forum.182030.xyz：frontend-x 静态资源 + 同源 API | `npx wrangler deploy -c wrangler.x.jsonc` |
 | `wrangler.backend.jsonc` | `forum-backend` | i.182030.xyz：**纯 API**（无 assets；根/未定义路径空 404） | `npx wrangler deploy -c wrangler.backend.jsonc` |
 | `wrangler.frontend.jsonc` | `forum-frontend` | f.182030.xyz：**纯前端**（assets 指 `../frontend-x/dist-f`，无代码） | `npx wrangler deploy -c wrangler.frontend.jsonc` |
 
@@ -103,7 +103,8 @@ npx wrangler secret put RESEND_API_KEY      --name forum-backend          # 尚�
 
 ## SEO 层（2026-10-07 起）
 
-- **唯一收录主域 = `forum.182030.xyz`**（可用 KV `config:seo.canonical_host` 改，无需改代码）。x / f 域页面 canonical 一律归并到主域，不做用户可见 301。
+- **唯一收录主域 = `starlr.tech`**（KV `config:seo.canonical_host`，改它无需改代码）。x / forum / f / www 域页面 canonical 一律归并到主域，不做用户可见 301。
+- 主站地址 = x Worker 的 `SITE_URL`（`https://starlr.tech`）：邮件链接、OAuth 回跳、APP 协议链接都跟它；`JWT_ISSUER` 与 `APP_AUTH_ORIGIN` **刻意保持 x.182030.xyz**（改前者会让全部用户掉线，改后者会让旧 APK 登录桥接失配）。
 - **爬虫动态渲染**：`backend/src/routes/seo.ts` 对搜索引擎/社交爬虫 UA 直接输出真实正文 HTML（h1/正文/回复/JSON-LD），真人继续走 SPA。新增爬虫或页面类型都在此文件扩展。
 - **SEO 路径必须进 Worker**：`wrangler.x.jsonc` 的 `assets.run_worker_first` 已含页面路径 + `/robots.txt` `/sitemap.xml` `/feed.xml`；**新增 SEO 页面路由时同步加进去**，否则会被静态资源层截胡。
 - 爬虫兜底走 `index.ts` 的 `notFound`（`seoFallback`）——**不要在 seo.ts 里写 `app.get('*')` 通配**，它会吞掉后挂载的 `/api/*` 路由（曾出过该事故）。
