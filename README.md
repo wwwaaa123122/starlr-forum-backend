@@ -212,6 +212,8 @@ KV 运行时配置（管理后台）  >  环境变量 / Secret  >  src/config/de
 | `SSO_ALLOWED_ORIGINS` | | 空 | 允许「登录状态同步」的第三方站点源，逗号分隔 |
 | `APP_AUTH_ORIGIN` | | `SITE_URL` 的 origin | Android 客户端登录桥接页（`/app-auth`）所在站点源 |
 | `CANONICAL_SITE_URL` | | `SITE_URL` 的 origin | SEO canonical / sitemap 归并目标 |
+
+> 访问 `www.` 前缀的域名会自动 **301 到根域**（同一内容只保留一个规范域名；API 路径不跳转以免 POST 丢请求体）。
 | `MAIL_TRANSPORT` | | — | 设 `memory` = 邮件只写内存不外发（测试用） |
 | `TURNSTILE_DISABLED` | | — | 设 `true` 跳过人机验证。**生产禁止设置** |
 

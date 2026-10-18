@@ -18,6 +18,9 @@ Hono + Cloudflare Workers + TypeScript 后端。**一套源码，四个部署目
 
 ## 验证命令
 
+> 测试读 `wrangler.test.jsonc`（**无 assets**）：本地 `wrangler.jsonc` 的 assets 指向 `../frontend/dist`，
+> CI 只 checkout 后端仓库时该目录不存在，会让 vitest 直接报 assets 目录不存在的错误。
+
 ```bash
 npx tsc --noEmit          # 改完代码必跑（无 vitest 覆盖时这是唯一门禁）
 pnpm test                 # vitest（部分 lib 有用例）

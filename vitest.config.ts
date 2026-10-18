@@ -27,7 +27,8 @@ export default defineWorkersConfig(async () => {
       poolOptions: {
         workers: {
           singleWorker: true,
-          wrangler: { configPath: './wrangler.jsonc' },
+          // 测试专用配置：不带 assets（CI 里没有前端产物目录，wrangler.jsonc 会因此报错）
+          wrangler: { configPath: './wrangler.test.jsonc' },
           miniflare: {
             bindings: {
               TEST_MIGRATIONS: migrations,

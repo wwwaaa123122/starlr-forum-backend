@@ -1,0 +1,25 @@
+// Starlr Forum — 测试专用配置（vitest-pool-workers 读取）
+//
+// 为什么单独一份：本地开发用的 wrangler.jsonc 带 `assets.directory`（指向 ../frontend/dist），
+// 而 CI 只 checkout 后端仓库，那个目录不存在会让 vitest 直接报
+// 「The directory specified by the "assets.directory" field ... does not exist」。
+// 测试不需要静态资源，因此这里刻意不配 assets。
+//
+// 绑定名必须与 wrangler.jsonc 一致（DB / CACHE / UPLOADS）：测试通过 miniflare 本地存储运行，
+// database_id / KV id 不参与真实资源解析，保留占位值即可。
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "xingchen-forum-test",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "xingchen-forum-test-db",
+      "database_id": "00000000-0000-0000-0000-000000000000"
+    }
+  ],
+  "kv_namespaces": [{ "binding": "CACHE", "id": "test-kv-namespace-placeholder" }],
+  "r2_buckets": [{ "binding": "UPLOADS", "bucket_name": "xingchen-forum-test-uploads" }]
+}

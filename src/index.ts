@@ -44,6 +44,19 @@ app.use('*', async (c, next) => {
   await next();
 });
 
+// www → 根域 301：同一内容只保留一个规范域名（canonical 与 sitemap 都用根域），
+// 避免搜索引擎把 www 与根域当成两个站点。API 路径不跳转（POST 301 会丢请求体）。
+app.use('*', async (c, next) => {
+  const url = new URL(c.req.url);
+  const isRead = c.req.method === 'GET' || c.req.method === 'HEAD';
+  const isApiLike = url.pathname.startsWith('/api/') || url.pathname.startsWith('/.well-known/') || url.pathname.startsWith('/oauth/');
+  if (isRead && !isApiLike && url.hostname.startsWith('www.')) {
+    url.hostname = url.hostname.slice(4);
+    return c.redirect(url.toString(), 301);
+  }
+  await next();
+});
+
 // 安全响应头（全局，挂在 requestId 旁）：nosniff 防 MIME 嗅探、DENY 防点击劫持、
 // Referrer-Policy 限制外泄完整 URL。刻意不加 CSP（避免破坏 SPA/静态资源），
 // 也不触碰 API 的 Cache-Control 逻辑（由下方 /api/* 中间件与各路由自理）。
