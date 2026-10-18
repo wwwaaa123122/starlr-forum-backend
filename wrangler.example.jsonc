@@ -1,0 +1,79 @@
+// ============================================================================
+// Starlr Forum — 单 Worker 部署模板（推荐，前后端同域）
+// ============================================================================
+// 复制为 wrangler.prod.jsonc 后按注释填自己的值，或直接运行：
+//   npm run setup        # 自动创建 D1/KV/R2 并生成填好的配置（推荐）
+//
+// 这个模板把「网页前端静态资源 + API」放在同一个 Worker、同一个域名下：
+//   https://forum.example.com/            → 前端页面（assets）
+//   https://forum.example.com/api/...     → API（Worker 代码）
+// 同域部署不需要配置 CORS，也不需要 VITE_API_BASE。
+//
+// 部署：
+//   npm run build:assets                 # 在 frontend-x 仓库构建前端到 ../frontend-x/dist
+//   npx wrangler deploy -c wrangler.prod.jsonc
+// ============================================================================
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "my-forum",                       // ← 改成你的 Worker 名（小写字母/数字/连字符）
+  "main": "src/index.ts",
+  "compatibility_date": "2025-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // 你的域名（可写多个；自定义域名需该域已在同一 Cloudflare 账号下）
+  "routes": [
+    { "pattern": "forum.example.com", "custom_domain": true }
+  ],
+
+  "assets": {
+    // ← 前端构建产物目录：克隆目录名不同就改这里（frontend-x 仓库 npm run build 生成 dist/）
+    "directory": "../starlr-forum-frontend-x/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    // 这些路径交给 Worker 处理（API + SEO + 页面首屏），其余直接由静态资源返回
+    "run_worker_first": [
+      "/api/*", "/oauth/*", "/.well-known/*",
+      "/", "/post/*", "/u/*", "/c/*", "/categories", "/explore",
+      "/terms", "/privacy", "/license", "/verify-email", "/reset-password",
+      "/robots.txt", "/sitemap.xml", "/feed.xml"
+    ]
+  },
+
+  // ↓↓↓ 由 `npm run setup` 自动生成 / 也可在 Cloudflare 控制台手动创建后粘贴 ID
+  "d1_databases": [
+    { "binding": "DB", "database_name": "my-forum-db", "database_id": "REPLACE_WITH_D1_DATABASE_ID" }
+  ],
+  "kv_namespaces": [
+    { "binding": "CACHE", "id": "REPLACE_WITH_KV_NAMESPACE_ID" }
+  ],
+  "r2_buckets": [
+    { "binding": "UPLOADS", "bucket_name": "my-forum-uploads" }
+  ],
+
+  "observability": { "enabled": true },
+
+  // 普通变量（明文、随代码部署，不要放密钥）
+  "vars": {
+    "SITE_URL": "https://forum.example.com",   // ← 站点根地址（无尾斜杠）
+    "JWT_ISSUER": "https://forum.example.com", // ← 一般与 SITE_URL 相同
+    "JWT_AUDIENCE": "api",
+    "ACCESS_TOKEN_TTL": "1800",
+    "REFRESH_TOKEN_TTL": "2592000",
+    "PASSWORD_ITERATIONS": "100000",
+    // Turnstile 站点密钥（公开值，前端会拿到）；留空则不显示人机验证组件
+    "TURNSTILE_SITE_KEY": "",
+    // 发件人（Resend 验证过的域名）；留空则用 defaults.json 里的兜底值
+    "MAIL_FROM": "My Forum <no-reply@example.com>",
+    // 跨域白名单（同域部署留空即可；前后端分离时填前端源，逗号分隔）
+    "ALLOWED_ORIGINS": "",
+    // OAuth 登录回跳白名单（留空 = ALLOWED_ORIGINS + SITE_URL）
+    "OAUTH_REDIRECT_ORIGINS": ""
+  },
+
+  // 密钥不要写在这里，用 wrangler secret put 设置（写后不可读）：
+  //   npx wrangler secret put JWT_SIGNING_KEYS    -c wrangler.prod.jsonc
+  //   npx wrangler secret put TURNSTILE_SECRET_KEY -c wrangler.prod.jsonc
+  //   npx wrangler secret put RESEND_API_KEY       -c wrangler.prod.jsonc
+
+  "placement": { "mode": "smart" }
+}

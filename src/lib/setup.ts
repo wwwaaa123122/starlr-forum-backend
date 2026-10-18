@@ -46,7 +46,10 @@ export async function writeSetupConfig(env: Env, cfg: Partial<SetupConfig>): Pro
   await env.CACHE.put(KV_KEY, raw);
 }
 
-/** 首个注册用户自动成为管理员：users 表为空即视为首次初始化 */
+/**
+ * 是否仍处于「无管理员」的初始状态（仅用于展示/脚本判断）。
+ * 注册流程不使用它做权限判断——那里用单条原子 UPDATE 提升，避免并发下出现多个管理员。
+ */
 export async function isFirstUser(env: Env): Promise<boolean> {
   const row = await env.DB.prepare(`SELECT COUNT(*) AS n FROM users`).first<{ n: number }>();
   return (row?.n ?? 0) === 0;

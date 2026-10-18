@@ -176,7 +176,7 @@ app.post('/:key/test', async (c) => {
     if (!/^Ov23li|^Iv1\./.test(cfg.client_id)) {
       return ok(c, { ok: false, message: `client_id 格式可疑：${cfg.client_id.slice(0, 8)}…（GitHub 通常为 Ov23li… 或 Iv1.开头）` });
     }
-    return ok(c, { ok: true, message: `凭据已配置（client_id=${cfg.client_id}）。回调地址须为 https://i.182030.xyz/oauth/callback/github，以登录页实际跳转为准。` });
+    return ok(c, { ok: true, message: `凭据已配置（client_id=${cfg.client_id}）。回调地址须为 ${new URL(c.env.SITE_URL).origin}/oauth/callback/github，以登录页实际跳转为准。` });
   }
 
   throw errors.badRequest('该服务不支持测试', 'NOT_TESTABLE');

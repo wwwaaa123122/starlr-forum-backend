@@ -15,7 +15,7 @@ import { verifyTurnstile } from '../lib/turnstile';
 import { sessionInfoFrom } from '../lib/session-info';
 import { requireAuth } from '../middleware/auth';
 import { writeAuditLog } from '../lib/audit';
-import { getSetupConfig, isFirstUser } from '../lib/setup';
+import { getSetupConfig } from '../lib/setup';
 import { sendVerificationEmail, createEmailVerificationToken, consumeEmailVerificationToken, consumePasswordResetToken, createPasswordResetToken, sendEmail } from '../lib/mail';
 
 const app = new Hono<AppEnv>();
@@ -142,21 +142,30 @@ app.post('/register', async (c) => {
       .run();
   }
 
-  // 首个注册用户自动成为管理员（站点初始化）
-  const first = await isFirstUser(c.env);
-  const role = first ? 'admin' : 'user';
-
+  // 首个注册用户自动成为管理员（站点初始化）：
+  // 先按普通用户插入，再用**单条原子 UPDATE** 提升——并发注册时只有一个能拿到 admin
+  // （UPDATE ... AND NOT EXISTS(其他 admin) 由 SQLite 串行执行保证唯一），避免多管理员/权限提升。
   try {
     await c.env.DB.prepare(
       `INSERT INTO users (id, uid, username, username_raw, email, password_hash, nickname, role, status, email_verified, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'user', 'active', ?, ?, ?)`,
     )
-      .bind(userId, uid, usernameLower, body.username, email ?? `noemail-${userId}@users.invalid`, passwordHash, nickname, role, first || !setup.emailRequired ? 1 : 0, nowIso(), nowIso())
+      .bind(userId, uid, usernameLower, body.username, email ?? `noemail-${userId}@users.invalid`, passwordHash, nickname, setup.emailRequired ? 0 : 1, nowIso(), nowIso())
       .run();
   } catch {
     // 并发注册触发唯一约束
     throw errors.conflict(CONFLICT_MESSAGE, 'USER_EXISTS');
   }
+
+  // 判定条件 = 「我是库里唯一的用户」（原子、且不会在管理员被删除后把权限白送出去）
+  const promote = await c.env.DB.prepare(
+    `UPDATE users SET role = 'admin', email_verified = 1, updated_at = ?
+      WHERE id = ? AND NOT EXISTS (SELECT 1 FROM users WHERE id <> ?)`,
+  )
+    .bind(nowIso(), userId, userId)
+    .run();
+  const first = (promote.meta?.changes ?? 0) > 0;
+  const role: 'admin' | 'user' = first ? 'admin' : 'user';
 
   // 激活邮件（失败不影响注册；用户可在设置页重新发送）。无邮箱模式跳过
   if (setup.emailRequired && email) {

@@ -48,6 +48,7 @@
     "PASSWORD_ITERATIONS": "100000",
     "TURNSTILE_SITE_KEY": "0x4AAAAAAFOSQFHmv_Mdvjrg",
     "SSO_ALLOWED_ORIGINS": "https://zako.mom,https://x.182030.xyz",
+    "OAUTH_REDIRECT_ORIGINS": "https://x.182030.xyz,https://forum.182030.xyz,https://f.182030.xyz",
     "MAIL_FROM": "Starlr Forum <no-reply@182030.xyz>"
   },
   // 生产密钥（JWT_SIGNING_KEYS / TURNSTILE_SECRET_KEY）通过 wrangler secret put 注入：

@@ -17,11 +17,20 @@ export interface Env {
   REFRESH_TOKEN_TTL: string;
   PASSWORD_ITERATIONS: string;
   ALLOWED_ORIGINS?: string;
+  /** OAuth 登录成功后可回跳的前端源（逗号分隔）；留空则用 ALLOWED_ORIGINS + SITE_URL */
+  OAUTH_REDIRECT_ORIGINS?: string;
   /** 允许发起「登录状态同步」的第三方站点源（逗号分隔） */
   SSO_ALLOWED_ORIGINS?: string;
+  /**
+   * Android 客户端浏览器登录桥接页（/app-auth）所在站点源，如 https://forum.example.com。
+   * 留空则取 SITE_URL 的 origin。自部署无需改代码。
+   */
+  APP_AUTH_ORIGIN?: string;
+  /** SEO 主域（canonical/sitemap 归并目标）；留空则取 SITE_URL 的 origin */
+  CANONICAL_SITE_URL?: string;
   /** Turnstile 站点密钥（公开，可暴露给前端） */
   TURNSTILE_SITE_KEY?: string;
-  /** 发件人（Resend），如：Starlr Forum <no-reply@182030.xyz> */
+  /** 发件人（Resend），如：My Forum <no-reply@example.com> */
   MAIL_FROM?: string;
   /** 'memory'：邮件写入内存 outbox（测试/本地），未设置则走 Resend */
   MAIL_TRANSPORT?: string;

@@ -1,0 +1,59 @@
+// ============================================================================
+// Starlr Forum — 独立 API Worker 模板（前后端分离部署时使用）
+// ============================================================================
+// 适用场景：前端部署在静态托管 / 另一域名（如 Cloudflare Pages），浏览器跨域直连本 API；
+// 或者你要给 Android 客户端提供独立 API 域名。
+//
+//   https://api.example.com/api/...   → 本 Worker（纯 API，无静态资源）
+//   https://forum.example.com         → 前端（构建时 VITE_API_BASE=https://api.example.com）
+//
+// 部署前必须把前端域名加进 ALLOWED_ORIGINS，否则浏览器会被 CORS 拦截。
+// 若同时部署了单 Worker（同域）版本，两者可共享同一套 D1/KV/R2 数据。
+// ============================================================================
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "my-forum-api",                   // ← 改成你的 Worker 名
+  "main": "src/index.ts",
+  "compatibility_date": "2025-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  "routes": [
+    { "pattern": "api.example.com", "custom_domain": true }
+  ],
+
+  // 纯 API：不配置 assets
+
+  "d1_databases": [
+    { "binding": "DB", "database_name": "my-forum-db", "database_id": "REPLACE_WITH_D1_DATABASE_ID" }
+  ],
+  "kv_namespaces": [
+    { "binding": "CACHE", "id": "REPLACE_WITH_KV_NAMESPACE_ID" }
+  ],
+  "r2_buckets": [
+    { "binding": "UPLOADS", "bucket_name": "my-forum-uploads" }
+  ],
+
+  "observability": { "enabled": true },
+
+  "vars": {
+    "SITE_URL": "https://forum.example.com",      // ← 前端站点地址（邮件链接、OAuth 回跳用它）
+    "JWT_ISSUER": "https://api.example.com",      // ← 本 Worker 的对外地址
+    "JWT_AUDIENCE": "api",
+    "ACCESS_TOKEN_TTL": "1800",
+    "REFRESH_TOKEN_TTL": "2592000",
+    "PASSWORD_ITERATIONS": "100000",
+    "TURNSTILE_SITE_KEY": "",
+    "MAIL_FROM": "My Forum <no-reply@example.com>",
+    // 必填：允许跨域访问本 API 的前端源（逗号分隔）
+    "ALLOWED_ORIGINS": "https://forum.example.com",
+    // Android 客户端登录桥接页所在站点源（留空 = SITE_URL 的 origin）
+    "APP_AUTH_ORIGIN": "https://forum.example.com"
+  },
+
+  // 密钥用 wrangler secret put 设置：
+  //   npx wrangler secret put JWT_SIGNING_KEYS    -c wrangler.api.jsonc
+  //   npx wrangler secret put TURNSTILE_SECRET_KEY -c wrangler.api.jsonc
+  //   npx wrangler secret put RESEND_API_KEY       -c wrangler.api.jsonc
+
+  "placement": { "mode": "smart" }
+}

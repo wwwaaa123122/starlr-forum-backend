@@ -2,15 +2,24 @@
 node_modules/
 .wrangler/
 dist/
+dist-f/
 coverage/
 
 # 密钥与本地配置（绝不提交）
 .dev.vars
+.env
+.env.*
+!.env.example
+!.dev.vars.example
 *.pem
 *.key
 secrets/
-.env
 *.local
+
+# 由 scripts/setup.mjs 生成的部署配置（含你自己的资源 ID / 域名，属个人配置）
+wrangler.prod.jsonc
+wrangler.api.jsonc
+wrangler.local.jsonc
 
 # 系统文件
 .DS_Store

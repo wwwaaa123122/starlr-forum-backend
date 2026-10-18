@@ -5,10 +5,10 @@
  *  - 按 provider 参数化：/oauth/start/:provider、/oauth/callback/:provider
  *    凭据存 KV：`config:oauth:<provider>` = { client_id, client_secret, callback_origin? }
  *    （不入 wrangler vars/secret，改配置无需重新部署；callback_origin 固定指向
- *      承载 GitHub OAuth App 回调的 Worker，默认 https://i.182030.xyz）
+ *      承载 GitHub OAuth App 回调的 Worker，默认取 SITE_URL）
  *  - 单一 GitHub OAuth App 同时服务两个前端：
  *      1) 前端按钮 → {API_BASE}/oauth/start/github?redirect=<前端 origin>
- *      2) GitHub 回调 → callback_origin（i.182030.xyz）/oauth/callback/github
+ *      2) GitHub 回调 → callback_origin（默认 SITE_URL）/oauth/callback/github
  *         建/联用户后生成一次性 code 存共享 KV（TTL 600s）
  *      3) 302 回 前端 /oauth/github/done?code=...，前端用 code 调
  *         POST /api/auth/oauth/exchange（本文件，挂载在 /api/auth/oauth）
@@ -39,17 +39,32 @@ function deviceInfoFrom(c: Context<AppEnv>): string {
 const STATE_TTL = 600;
 const CODE_TTL = 600;
 
-/** 前端 origin 白名单（state 回跳校验） */
-const REDIRECT_ALLOWLIST = new Set([
-  'https://x.182030.xyz',
-  'https://forum.182030.xyz',
-  'https://f.182030.xyz',
-  // 本地开发
-  'http://localhost:5173',
-  'http://localhost:5174',
-  'http://127.0.0.1:5173',
-  'http://127.0.0.1:5174',
-]);
+/**
+ * 前端 origin 白名单（OAuth state 回跳校验）。
+ * 取值：环境变量 ALLOWED_ORIGINS（逗号分隔）+ 站点自身 origin（SITE_URL）+ 本地开发地址。
+ * 自部署者只需配置 SITE_URL / ALLOWED_ORIGINS，无需改代码。
+ */
+export function redirectAllowlist(env: AppEnv['Bindings']): Set<string> {
+  // 专用变量优先（不因 OAuth 回跳需求放宽 API 的 CORS 白名单）
+  const raw = (env.OAUTH_REDIRECT_ORIGINS ?? env.ALLOWED_ORIGINS ?? '');
+  const list = new Set<string>([
+    // 本地开发
+    'http://localhost:5173',
+    'http://localhost:5174',
+    'http://127.0.0.1:5173',
+    'http://127.0.0.1:5174',
+  ]);
+  for (const item of raw.split(',')) {
+    const origin = item.trim().replace(/\/+$/, '');
+    if (origin) list.add(origin);
+  }
+  try {
+    list.add(new URL(env.SITE_URL).origin);
+  } catch {
+    /* SITE_URL 非法则只保留已解析项 */
+  }
+  return list;
+}
 
 export interface GithubConfig {
   client_id: string;
@@ -90,12 +105,15 @@ export async function getConfig(env: AppEnv['Bindings'], provider: string): Prom
   return null;
 }
 
+/** OAuth 回调基址：KV 配置优先，其次站点自身 origin（SITE_URL） */
 function callbackOrigin(env: AppEnv['Bindings'], cfg: GithubConfig): string {
-  return (cfg.callback_origin ?? 'https://i.182030.xyz').replace(/\/+$/, '');
+  const configured = (cfg.callback_origin ?? '').trim();
+  if (configured) return configured.replace(/\/+$/, '');
+  return new URL(env.SITE_URL).origin;
 }
 
 function safeRedirect(origin: string | undefined, env: AppEnv['Bindings']): string {
-  if (origin && REDIRECT_ALLOWLIST.has(origin.replace(/\/+$/, ''))) return origin.replace(/\/+$/, '');
+  if (origin && redirectAllowlist(env).has(origin.replace(/\/+$/, ''))) return origin.replace(/\/+$/, '');
   return new URL(env.SITE_URL).origin; // 兜底：回站点首页
 }
 

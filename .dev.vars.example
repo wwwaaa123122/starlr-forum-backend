@@ -1,13 +1,27 @@
-# 本地开发环境变量示例
-# 复制为 backend/.dev.vars（已被 .gitignore 忽略，绝不提交）
-# 生成密钥：node scripts/generate-jwt-keys.mjs（仓库内 scripts/ 目录）
+# ============================================================================
+# 本地开发环境变量示例（wrangler dev 读取）
+# ============================================================================
+# 用法：
+#   cp .dev.vars.example .dev.vars
+#   node scripts/generate-jwt-keys.mjs      # 自动生成 RS256 密钥并写入 .dev.vars
+#
+# .dev.vars 已被 .gitignore 忽略，**绝不提交**。
+# 生产环境不要用这个文件：生产密钥用 `npx wrangler secret put <名称>` 设置。
+# ============================================================================
 
+# --- 必填：JWT 签名密钥（RS256 私钥 JWK 数组，JSON 一行）---
+# 不要手写：运行 node scripts/generate-jwt-keys.mjs 会自动填好这一行。
 JWT_SIGNING_KEYS=[{"kid":"dev-001","jwk":{"kty":"RSA","n":"...","e":"AQAB","d":"...","p":"...","q":"...","dp":"...","dq":"...","qi":"..."},"active":true}]
-TURNSTILE_DISABLED=true
 
-# 邮件（Resend）：本地默认写内存，不真实外发；生产用 wrangler secret put RESEND_API_KEY
+# --- 本地开发便利项 ---
+# 本地跳过人机验证（生产绝不要设置这个变量）
+TURNSTILE_DISABLED=true
+# 邮件写入内存 outbox，不真实外发（可用测试辅助函数读取）
 MAIL_TRANSPORT=memory
-# MAIL_FROM=星辰旅人论坛 <no-reply@182030.xyz>
-# 如需本地启用 Turnstile：
-# TURNSTILE_DISABLED=
-# TURNSTILE_SECRET_KEY=0x4AAAAAAA...
+
+# --- 可选：以下不设置也能启动 ---
+# MAIL_FROM=My Forum <no-reply@example.com>
+# RESEND_API_KEY=re_xxxxxxxx        # 想真实发信时填（或改用管理后台服务配置）
+# TURNSTILE_SECRET_KEY=0x4AAAAAAA... # 想本地测试 Turnstile 时填，并把 TURNSTILE_DISABLED 去掉
+# ALLOWED_ORIGINS=http://localhost:5174
+# APP_AUTH_ORIGIN=http://localhost:5174

@@ -165,6 +165,7 @@ app.get('/', async (c) => {
   return c.html(
     renderPage({
       mode: 'bot',
+      siteName: SITE_NAME,
       host: c.req.header('host') ?? cfg.canonical_host,
       cfg,
       meta: {
@@ -242,6 +243,7 @@ app.get('/post/:id', async (c) => {
   return c.html(
     renderPage({
       mode: 'bot',
+      siteName: SITE_NAME,
       host: c.req.header('host') ?? cfg.canonical_host,
       cfg,
       meta: {
@@ -273,6 +275,7 @@ app.get('/categories', async (c) => {
   return c.html(
     renderPage({
       mode: 'bot',
+      siteName: SITE_NAME,
       host: c.req.header('host') ?? cfg.canonical_host,
       cfg,
       meta: {
@@ -316,6 +319,7 @@ app.get('/u/:username', async (c) => {
   return c.html(
     renderPage({
       mode: 'bot',
+      siteName: SITE_NAME,
       host: c.req.header('host') ?? cfg.canonical_host,
       cfg,
       meta: {
@@ -353,6 +357,7 @@ app.get('/explore', async (c) => {
   return c.html(
     renderPage({
       mode: 'bot',
+      siteName: SITE_NAME,
       host: c.req.header('host') ?? cfg.canonical_host,
       cfg,
       meta: {
@@ -372,6 +377,7 @@ export async function seoFallback(c: Context<AppEnv>): Promise<Response | undefi
   return c.html(
     renderPage({
       mode: 'bot',
+      siteName: SITE_NAME,
       host: c.req.header('host') ?? cfg.canonical_host,
       cfg,
       meta: { title: `页面不存在 - ${SITE_NAME}`, description: SITE_TAGLINE, path: new URL(c.req.raw.url).pathname, noindex: true },

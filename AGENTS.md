@@ -124,3 +124,11 @@ npx wrangler secret put RESEND_API_KEY      --name forum-backend          # 尚�
 - 轮询：秒级时间片取模分摊限额；当前账号发送失败（限速/余额/域名问题）自动顺移下一个，全部失败才报错并附最后错误。
 - 新账号的 From 域必须在对应 Resend 账号里验证（API `GET /domains` 可查）。
 - 管理后台「服务配置 → 邮件」可视化增删账号；api_key 留空 = 保持原值；env 兜底行只读展示。
+
+## 自部署模板与初始化脚本（开源适配）
+
+- `wrangler.example.jsonc`（单 Worker 同域）/ `wrangler.api.example.jsonc`（纯 API 分离部署）是**给别人的模板**，不含真实 ID；`scripts/setup.mjs` 读模板生成 `wrangler.prod.jsonc` / `wrangler.api.jsonc`（已 gitignore）。
+- 作者自己的 `wrangler.x.jsonc` / `.backend` / `.frontend` 保持原样，只用于作者生产；不要把它们改成通用模板。
+- 首个注册用户自动 admin 用**单条原子 UPDATE**（`NOT EXISTS (SELECT 1 FROM users WHERE id <> ?)`）：并发只有一个管理员，且管理员被删后不会把权限白送给新注册者。改这段逻辑务必保住这两个性质。
+- 所有站点相关的硬编码域名都走环境变量：`SITE_URL` / `APP_AUTH_ORIGIN` / `CANONICAL_SITE_URL` / `ALLOWED_ORIGINS` / `OAUTH_REDIRECT_ORIGINS` / `SSO_ALLOWED_ORIGINS`。新增代码**不得**再写死域名。
+- 默认值集中在 `src/config/defaults.json`，不要在代码里新增魔法默认值。

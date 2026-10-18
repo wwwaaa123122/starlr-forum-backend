@@ -13,8 +13,12 @@ function tokenFromLatestMail(): string {
   return m[1];
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   __clearMailOutbox();
+  // 预置一个用户：全新数据库的首个注册者会被自动提升为管理员（站点初始化特性），
+  // 本文件用例断言的是「普通新用户未验证」路径，因此每个用例先确保库非空。
+  // （vitest-pool-workers 默认按用例隔离存储，故不能用模块级标记只播种一次）
+  await createUser({ username: `seed${Math.random().toString(36).slice(2, 8)}` });
 });
 
 describe('邮箱验证', () => {

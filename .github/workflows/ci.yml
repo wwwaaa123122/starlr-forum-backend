@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    name: typecheck + test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: TypeScript 类型检查
+        run: npm run typecheck
+
+      # 测试使用 vitest-pool-workers：每次运行临时生成 RS256 密钥，
+      # 关闭 Turnstile、邮件走内存 outbox —— 不需要任何仓库 Secret 即可运行。
+      - name: 单元/集成测试
+        run: npm test

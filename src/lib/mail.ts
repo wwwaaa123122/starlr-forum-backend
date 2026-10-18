@@ -221,12 +221,13 @@ export async function consumeEmailVerificationToken(env: Env, token: string): Pr
 /** 发送激活账号邮件（注册后 / 重新发送） */
 export async function sendVerificationEmail(env: Env, to: string, nickname: string, token: string): Promise<boolean> {
   const link = `${env.SITE_URL}/verify-email?token=${token}`;
+  const site = await getSiteInfo(env);
   return sendEmail(
     env,
     to,
-    '激活你的 Starlr Forum 账号',
+    `激活你的 ${site.siteName} 账号`,
     `<p>你好，<strong>${escapeHtml(nickname)}</strong>！</p>
-     <p>感谢注册 Starlr Forum。请点击下面的按钮激活账号（链接 24 小时内有效）：</p>
+     <p>感谢注册 ${escapeHtml(site.siteName)}。请点击下面的按钮激活账号（链接 24 小时内有效）：</p>
      <p style="margin:20px 0;">
        <a href="${link}" style="background:#4f46e5;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;display:inline-block;">激活账号</a>
      </p>

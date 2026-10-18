@@ -4,7 +4,7 @@
  * 背景：论坛登录态存在各站点自己的 localStorage（按源隔离），第三方站点无法直接读取；
  * 而现代浏览器对第三方 iframe 的存储做了分区，iframe 也读不到。因此采用「重定向 + 一次性 ticket」：
  *
- *   1) 第三方站点（如 zako.mom）生成随机 challenge，跳转
+ *   1) 第三方站点（如某个合作站）生成随机 challenge，跳转
  *      {论坛前端}/sso-bridge?redirect=<回跳地址>&challenge=<challenge>
  *   2) 桥接页（论坛源，第一方上下文）读出本域登录态后，调本端点签发 ticket：
  *      POST /api/auth/site-login/issue  {origin, challenge}   ← 需登录（Bearer）
@@ -40,19 +40,33 @@ export { TICKET_TTL };
 /** 管理后台维护的 SSO 配置（KV `config:sso`：{ enabled, origins }） */
 export const SSO_KV_KEY = 'config:sso';
 
-/** 允许发起登录同步的站点（未配置 KV / 环境变量时的兜底） */
-export const DEFAULT_SSO_ORIGINS = [
-  'https://zako.mom',
-  'https://x.182030.xyz', // Android 客户端浏览器登录桥接页（/app-auth）
-  'http://127.0.0.1:8788',
-  'http://localhost:8788',
-];
+/** 本地开发用的默认站点源（生产请用 KV config:sso 或环境变量 SSO_ALLOWED_ORIGINS 配置） */
+export const DEV_SSO_ORIGINS = ['http://127.0.0.1:8788', 'http://localhost:8788'];
 
-/** 自有桥接源：Android 应用登录的 app-auth 页固定跑在 x 站，属第一方基础设施，任何配置下都放行 */
-export const APP_AUTH_BRIDGE_ORIGIN = 'https://x.182030.xyz';
+/**
+ * 自有桥接源：Android 应用浏览器登录桥接页（/app-auth）所在站点，属第一方基础设施，任何配置下都放行。
+ * 取值顺序：环境变量 APP_AUTH_ORIGIN → SITE_URL 的 origin。自部署者无需改代码。
+ */
+export function appAuthBridgeOrigin(env: AppEnv['Bindings']): string {
+  const explicit = (env.APP_AUTH_ORIGIN ?? '').trim();
+  if (explicit) return normalizeOrigin(explicit);
+  try {
+    return new URL(env.SITE_URL).origin;
+  } catch {
+    return '';
+  }
+}
 
-function withBridgeOrigin(origins: string[]): string[] {
-  return origins.includes(APP_AUTH_BRIDGE_ORIGIN) ? origins : [...origins, APP_AUTH_BRIDGE_ORIGIN];
+/** 未配置 KV / 环境变量时的兜底：站点自身 origin + 本地开发源 */
+export function defaultSsoOrigins(env: AppEnv['Bindings']): string[] {
+  const own = appAuthBridgeOrigin(env);
+  return [...(own ? [own] : []), ...DEV_SSO_ORIGINS];
+}
+
+function withBridgeOrigin(origins: string[], env: AppEnv['Bindings']): string[] {
+  const bridge = appAuthBridgeOrigin(env);
+  if (!bridge) return origins;
+  return origins.includes(bridge) ? origins : [...origins, bridge];
 }
 
 export function normalizeOrigin(value: string | undefined): string {
@@ -98,7 +112,7 @@ export async function getSsoAccessConfig(env: AppEnv['Bindings']): Promise<SsoAc
       const obj = JSON.parse(raw) as { enabled?: boolean; origins?: unknown };
       const kvOrigins = normalizeOriginList(obj.origins);
       if (kvOrigins.length) {
-        return { enabled: obj.enabled !== false, origins: withBridgeOrigin(kvOrigins), source: 'kv' };
+        return { enabled: obj.enabled !== false, origins: withBridgeOrigin(kvOrigins, env), source: 'kv' };
       }
     } catch {
       // 配置损坏时落回 env / 默认，不让管理失误锁死所有站点
@@ -107,9 +121,9 @@ export async function getSsoAccessConfig(env: AppEnv['Bindings']): Promise<SsoAc
   const envRaw = (env.SSO_ALLOWED_ORIGINS ?? '').trim();
   if (envRaw) {
     const list = normalizeOriginList(envRaw.split(','));
-    if (list.length) return { enabled: true, origins: withBridgeOrigin(list), source: 'env' };
+    if (list.length) return { enabled: true, origins: withBridgeOrigin(list, env), source: 'env' };
   }
-  return { enabled: true, origins: withBridgeOrigin([...DEFAULT_SSO_ORIGINS]), source: 'default' };
+  return { enabled: true, origins: withBridgeOrigin(defaultSsoOrigins(env), env), source: 'default' };
 }
 
 const issueSchema = z.object({

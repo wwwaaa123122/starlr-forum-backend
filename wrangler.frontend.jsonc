@@ -18,5 +18,10 @@
   },
   "observability": {
     "enabled": true
+  },
+  "vars": {
+    // 主站地址：sitemap/feed 的 301 目标（自部署改成自己的主域）
+    "SITE_URL": "https://f.182030.xyz",
+    "CANONICAL_SITE_URL": "https://forum.182030.xyz"
   }
 }

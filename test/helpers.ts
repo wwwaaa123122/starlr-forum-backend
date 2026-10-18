@@ -74,7 +74,7 @@ export interface TestUser {
 let userSeq = 0;
 
 export async function createUser(
-  overrides: Partial<{ username: string; email: string; password: string; nickname: string }> = {},
+  overrides: Partial<{ username: string; email: string; password: string; nickname: string; role: string }> = {},
 ): Promise<TestUser> {
   userSeq++;
   const username = overrides.username ?? `user${userSeq}_${Math.random().toString(36).slice(2, 6)}`;
@@ -86,10 +86,12 @@ export async function createUser(
     body: { username, email, password, ...(overrides.nickname ? { nickname: overrides.nickname } : {}) },
   });
   if (res.status !== 201) throw new Error(`注册失败: ${res.status} ${JSON.stringify(res.body)}`);
-  // 默认视为已验证邮箱（新注册默认未验证，需验证的用例单独覆盖）
+  // 默认视为已验证邮箱（新注册默认未验证，需验证的用例单独覆盖）；
+  // 同时把角色重置为普通用户——全新数据库的首个注册者会被自动提升为管理员（站点初始化特性），
+  // 测试里需要确定性角色，管理员用例自行 UPDATE 提权。
   await (env as unknown as { DB: { prepare: (q: string) => { bind: (...v: unknown[]) => { run: () => Promise<unknown> } } } })
-    .DB.prepare(`UPDATE users SET email_verified = 1 WHERE username = LOWER(?)`)
-    .bind(username)
+    .DB.prepare(`UPDATE users SET email_verified = 1, role = ? WHERE username = LOWER(?)`)
+    .bind(overrides.role ?? 'user', username)
     .run();
   return {
     id: res.body.user.id,

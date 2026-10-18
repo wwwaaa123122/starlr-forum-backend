@@ -3,7 +3,7 @@
  *
  * 背景本站真实情况：
  *  - 前端是纯 SPA（React），百度等不支持 JS 渲染的爬虫抓不到任何正文；
- *  - x.182030.xyz 与 forum.182030.xyz 同内容（f.182030.xyz 为独立纯前端）→ 重复内容；
+ *  - 多个域名指向同一站点（同域 SPA + 独立纯前端）→ 重复内容；
  *  - 因此由 Worker 对爬虫 UA 直接输出带正文的语义化 HTML（内容与真人所见一致），
  *    并统一 canonical 到主域。
  */
@@ -106,8 +106,11 @@ export function renderPage(opts: {
   /** 真人访问：输出 SPA 壳（脚本），爬虫：输出静态正文 */
   mode: 'bot' | 'spa';
   spaScript?: string;
+  /** 站点名（og:site_name / RSS 标题）；省略时取 defaults.json 的 site.siteName */
+  siteName?: string;
 }): string {
   const { meta, cfg, host, bodyHtml, mode } = opts;
+  const siteName = opts.siteName || defaults.site.siteName;
   // meta.title / meta.description 常含用户可控内容（帖子标题、摘要、用户 bio/昵称等，见 routes/seo.ts 各调用点，
   // 调用方均传原文、未自行转义），在此统一做一次 HTML 转义，防止爬虫渲染页（含 og:title/og:description）的存储型 XSS。
   const safeTitle = escapeHtml(meta.title);
@@ -131,7 +134,7 @@ export function renderPage(opts: {
 <meta name="description" content="${safeDescription}" />
 ${robots}
 <link rel="canonical" href="${canonical}" />
-<meta property="og:site_name" content="Starlr Forum" />
+<meta property="og:site_name" content="${siteName}" />
 <meta property="og:type" content="${ogType}" />
 <meta property="og:title" content="${safeTitle}" />
 <meta property="og:description" content="${safeDescription}" />
@@ -139,7 +142,7 @@ ${robots}
 <meta property="og:locale" content="zh_CN" />
 <meta name="twitter:card" content="summary" />
 ${verifyMetas(cfg, host)}
-<link rel="alternate" type="application/rss+xml" title="Starlr Forum" href="${canonicalUrl(cfg, '/feed.xml')}" />
+<link rel="alternate" type="application/rss+xml" title="${siteName}" href="${canonicalUrl(cfg, '/feed.xml')}" />
 ${jsonLd}
 </head>
 <body>
