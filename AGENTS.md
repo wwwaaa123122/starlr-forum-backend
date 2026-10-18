@@ -109,7 +109,8 @@ npx wrangler secret put RESEND_API_KEY      --name forum-backend          # 尚�
 - **唯一收录主域 = `starlr.tech`**（KV `config:seo.canonical_host`，改它无需改代码）。x / forum / f / www 域页面 canonical 一律归并到主域，不做用户可见 301。
 - **starlr.tech 刻意不开橙云**：DNS 是 `CNAME → cf.090227.xyz`（灰云，proxied=false），靠 zone 路由 `starlr.tech/*`、`www.starlr.tech/*` 进 Worker。所以 `wrangler.x.jsonc` 里必须写 `zone_name` 路由，**不能改成 `custom_domain: true`**（那会强制托管 DNS 记录并开橙云，把这条链路拆掉）。证书由 Cloudflare Universal SSL 自动续期，无需手工管。
 - 重定向一律 **302**（www 归并、f 站 sitemap/feed），不要用 301：域名策略可能再调整，301 会被长期缓存。
-- 主站地址 = x Worker 的 `SITE_URL`（`https://starlr.tech`）：邮件链接、OAuth 回跳、APP 协议链接都跟它；`JWT_ISSUER` 与 `APP_AUTH_ORIGIN` **刻意保持 x.182030.xyz**（改前者会让全部用户掉线，改后者会让旧 APK 登录桥接失配）。
+- 主站地址 = x Worker 的 `SITE_URL`（`https://starlr.tech`）：邮件链接、OAuth 回跳、APP 协议链接都跟它；`JWT_ISSUER` **刻意保持 x.182030.xyz**（改它会让全部已登录用户掉线）。
+- **App 单域名**：Android release 的 `API_BASE_URL` 与 `APP_AUTH_BASE_URL` 都已指向 `https://starlr.tech`（前端 + 同源 API + app-auth 桥接页同一个 Worker）。`APP_AUTH_ORIGIN` 仍保留 x 作为**旧 APK 兜底**，`SSO_ALLOWED_ORIGINS` 同时含 x 与 starlr.tech——两个版本的 APK 都能登录，不要删任一个。
 - **爬虫动态渲染**：`backend/src/routes/seo.ts` 对搜索引擎/社交爬虫 UA 直接输出真实正文 HTML（h1/正文/回复/JSON-LD），真人继续走 SPA。新增爬虫或页面类型都在此文件扩展。
 - **SEO 路径必须进 Worker**：`wrangler.x.jsonc` 的 `assets.run_worker_first` 已含页面路径 + `/robots.txt` `/sitemap.xml` `/feed.xml`；**新增 SEO 页面路由时同步加进去**，否则会被静态资源层截胡。
 - 爬虫兜底走 `index.ts` 的 `notFound`（`seoFallback`）——**不要在 seo.ts 里写 `app.get('*')` 通配**，它会吞掉后挂载的 `/api/*` 路由（曾出过该事故）。

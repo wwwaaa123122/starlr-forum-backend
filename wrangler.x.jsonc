@@ -54,7 +54,7 @@
     "REFRESH_TOKEN_TTL": "2592000",
     "PASSWORD_ITERATIONS": "100000",
     "TURNSTILE_SITE_KEY": "0x4AAAAAAFOSQFHmv_Mdvjrg",
-    "SSO_ALLOWED_ORIGINS": "https://zako.mom,https://x.182030.xyz",
+    "SSO_ALLOWED_ORIGINS": "https://zako.mom,https://x.182030.xyz,https://starlr.tech",   // starlr.tech：新版 APK 的桥接页源
     "OAUTH_REDIRECT_ORIGINS": "https://x.182030.xyz,https://forum.182030.xyz,https://f.182030.xyz,https://starlr.tech,https://www.starlr.tech",
     "MAIL_FROM": "Starlr Forum <no-reply@182030.xyz>"
   },
