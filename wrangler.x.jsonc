@@ -8,9 +8,10 @@
   "routes": [
     { "pattern": "x.182030.xyz", "custom_domain": true },
     { "pattern": "forum.182030.xyz", "custom_domain": true },
-    // 新品牌域名（同一 Worker 承载，与 forum.182030.xyz 同内容）
-    { "pattern": "starlr.tech", "custom_domain": true },
-    { "pattern": "www.starlr.tech", "custom_domain": true }
+    // 新品牌域名：DNS 侧是「灰云 CNAME → cf.090227.xyz」（不开代理，直连 Cloudflare 边缘），
+    // 因此这里用普通 Worker 路由而不是 custom_domain（后者会强制托管 DNS 记录并开橙云）。
+    { "pattern": "starlr.tech/*", "zone_name": "starlr.tech" },
+    { "pattern": "www.starlr.tech/*", "zone_name": "starlr.tech" }
   ],
   "compatibility_date": "2025-10-01",
   "compatibility_flags": ["nodejs_compat"],

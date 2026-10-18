@@ -7,7 +7,7 @@ Hono + Cloudflare Workers + TypeScript 后端。**一套源码，四个部署目
 | 配置文件 | Worker | 用途 | 部署命令 |
 |---|---|---|---|
 | `wrangler.jsonc` | （无 name routes） | **仅 `wrangler dev` 本地开发**，assets 指 `../frontend/dist` | `npx wrangler dev` |
-| `wrangler.x.jsonc` | `xingchen-forum-x` | **starlr.tech（主站）+ www.starlr.tech** + x.182030.xyz + forum.182030.xyz：frontend-x 静态资源 + 同源 API | `npx wrangler deploy -c wrangler.x.jsonc` |
+| `wrangler.x.jsonc` | `xingchen-forum-x` | **starlr.tech（主站）+ www.starlr.tech（灰云 CNAME → cf.090227.xyz，走 Worker 路由而非 custom_domain）** + x.182030.xyz + forum.182030.xyz：frontend-x 静态资源 + 同源 API | `npx wrangler deploy -c wrangler.x.jsonc` |
 | `wrangler.backend.jsonc` | `forum-backend` | i.182030.xyz：**纯 API**（无 assets；根/未定义路径空 404） | `npx wrangler deploy -c wrangler.backend.jsonc` |
 | `wrangler.frontend.jsonc` | `forum-frontend` | f.182030.xyz：**纯前端**（assets 指 `../frontend-x/dist-f`，无代码） | `npx wrangler deploy -c wrangler.frontend.jsonc` |
 
@@ -107,6 +107,8 @@ npx wrangler secret put RESEND_API_KEY      --name forum-backend          # 尚�
 ## SEO 层（2026-10-07 起）
 
 - **唯一收录主域 = `starlr.tech`**（KV `config:seo.canonical_host`，改它无需改代码）。x / forum / f / www 域页面 canonical 一律归并到主域，不做用户可见 301。
+- **starlr.tech 刻意不开橙云**：DNS 是 `CNAME → cf.090227.xyz`（灰云，proxied=false），靠 zone 路由 `starlr.tech/*`、`www.starlr.tech/*` 进 Worker。所以 `wrangler.x.jsonc` 里必须写 `zone_name` 路由，**不能改成 `custom_domain: true`**（那会强制托管 DNS 记录并开橙云，把这条链路拆掉）。证书由 Cloudflare Universal SSL 自动续期，无需手工管。
+- 重定向一律 **302**（www 归并、f 站 sitemap/feed），不要用 301：域名策略可能再调整，301 会被长期缓存。
 - 主站地址 = x Worker 的 `SITE_URL`（`https://starlr.tech`）：邮件链接、OAuth 回跳、APP 协议链接都跟它；`JWT_ISSUER` 与 `APP_AUTH_ORIGIN` **刻意保持 x.182030.xyz**（改前者会让全部用户掉线，改后者会让旧 APK 登录桥接失配）。
 - **爬虫动态渲染**：`backend/src/routes/seo.ts` 对搜索引擎/社交爬虫 UA 直接输出真实正文 HTML（h1/正文/回复/JSON-LD），真人继续走 SPA。新增爬虫或页面类型都在此文件扩展。
 - **SEO 路径必须进 Worker**：`wrangler.x.jsonc` 的 `assets.run_worker_first` 已含页面路径 + `/robots.txt` `/sitemap.xml` `/feed.xml`；**新增 SEO 页面路由时同步加进去**，否则会被静态资源层截胡。
