@@ -25,8 +25,18 @@ async function spaFallback(c: Context<AppEnv>): Promise<Response> {
   return c.body(null, 404);
 }
 
-const SITE_NAME = 'Starlr Forum';
-const SITE_TAGLINE = '一个把论坛装进时间线的社区';
+// 站点名从 KV config:site 动态读取；模块级缓存，由路由中间件按请求刷新
+import { getSiteInfo } from '../lib/setup';
+let SITE_NAME = 'Forum';
+app.use('*', async (c, next) => {
+  try {
+    SITE_NAME = (await getSiteInfo(c.env)).siteName;
+  } catch {
+    /* 用缓存或兜底 */
+  }
+  await next();
+});
+const SITE_TAGLINE = '一个轻量、现代的社区论坛';
 
 // ---------------------------------------------------------------- robots.txt
 app.get('/robots.txt', async (c) => {
@@ -158,7 +168,7 @@ app.get('/', async (c) => {
       host: c.req.header('host') ?? cfg.canonical_host,
       cfg,
       meta: {
-        title: 'Starlr Forum', // 与前端 SPA 首页标题一致
+        title: SITE_NAME, // 与前端 SPA 首页标题一致
         description: `${SITE_NAME}（${cfg.canonical_host.replace(/^www\./, '')}）：${SITE_TAGLINE}。最新讨论：${posts.slice(0, 3).map((p) => p.title).join('、')}`,
         path: '/',
         jsonLd: [

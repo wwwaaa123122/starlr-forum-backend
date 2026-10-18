@@ -7,7 +7,7 @@
  *   routes/      REST API
  *   静态资源     frontend/dist（React + shadcn/ui，前后端分离构建）
  */
-import { getSetupConfig } from './lib/setup';
+import { getSetupConfig, getSiteInfo } from './lib/setup';
 import { Hono } from 'hono';
 import type { AppEnv } from './types';
 import { ApiError, jsonError } from './lib/http';
@@ -118,8 +118,12 @@ app.get('/api/health', (c) => c.json({ status: 'ok', time: new Date().toISOStrin
 // TURNSTILE_DISABLED=true（本地开发）时不下发 site key，前端也就不渲染验证组件
 app.get('/api/config', async (c) => {
   const setup = await getSetupConfig(c.env);
+  const site = await getSiteInfo(c.env);
   return c.json({
-    siteName: 'Starlr Forum',
+    siteName: site.siteName,
+    siteTagline: site.siteTagline,
+    siteDescription: site.siteDescription,
+    siteFooter: site.siteFooter,
     turnstileSiteKey:
       (!c.env.TURNSTILE_DISABLED && c.env.TURNSTILE_SITE_KEY) || null,
     registrationEnabled: setup.registrationEnabled,

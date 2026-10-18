@@ -51,3 +51,41 @@ export async function isFirstUser(env: Env): Promise<boolean> {
   const row = await env.DB.prepare(`SELECT COUNT(*) AS n FROM users`).first<{ n: number }>();
   return (row?.n ?? 0) === 0;
 }
+
+/** 站点信息（KV config:site）——自部署者改名字/昵称/描述，无需改代码 */
+export interface SiteInfo {
+  siteName: string;
+  siteTagline: string;
+  siteDescription: string;
+  siteFooter: string;
+}
+
+const SITE_KV_KEY = 'config:site';
+
+export const DEFAULT_SITE: SiteInfo = {
+  siteName: 'Starlr Forum',
+  siteTagline: '一个轻量、现代的社区论坛',
+  siteDescription: '一个运行在 Cloudflare 上的轻量级社区。',
+  siteFooter: '© Starlr Forum',
+};
+
+export async function getSiteInfo(env: Env): Promise<SiteInfo> {
+  try {
+    const raw = await env.CACHE.get(SITE_KV_KEY);
+    if (!raw) return { ...DEFAULT_SITE };
+    const cfg = JSON.parse(raw) as Partial<SiteInfo>;
+    return {
+      siteName: cfg.siteName || DEFAULT_SITE.siteName,
+      siteTagline: cfg.siteTagline || DEFAULT_SITE.siteTagline,
+      siteDescription: cfg.siteDescription || DEFAULT_SITE.siteDescription,
+      siteFooter: cfg.siteFooter || DEFAULT_SITE.siteFooter,
+    };
+  } catch {
+    return { ...DEFAULT_SITE };
+  }
+}
+
+export async function writeSiteInfo(env: Env, cfg: Partial<SiteInfo>): Promise<void> {
+  const merged = { ...(await getSiteInfo(env)), ...cfg };
+  await env.CACHE.put(SITE_KV_KEY, JSON.stringify(merged));
+}

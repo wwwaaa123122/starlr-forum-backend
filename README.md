@@ -272,6 +272,19 @@ wrangler secret put TURNSTILE_SECRET_KEY   # Turnstile widget secret
 | `registration_email_required` | `true` | 注册是否必须邮箱。**关闭后 = 用户名 + 密码直接注册**（无验证邮件，账号直接激活；邮箱字段存合成占位地址，登录走用户名） |
 | `uploads_storage` | `r2` | 图片存储后端。`r2` = Worker 绑定的 R2（零配置默认）；`s3` = 使用「服务配置 → S3 兼容存储」里配置的 S3 端点 |
 
+### 站点信息（站点名 / 标语 / 描述 / 页脚）
+
+管理后台 → 服务配置 → **站点设置**（`GET/PATCH /api/admin/services/site`，存 KV `config:site`）。改完立即生效，前端标题、登录页、页脚、邮件发件名、SEO 元信息全部跟随，**无需改任何代码**：
+
+| 配置项 | 默认值 | 用途 |
+|---|---|---|
+| `site_name` | `Starlr Forum` | 浏览器标题、og:site_name、邮件发件人名、APP 协议链接 |
+| `site_tagline` | 一个轻量、现代的社区论坛 | SEO 描述兜底 |
+| `site_description` | （空） | 首页 SEO 描述 |
+| `site_footer` | （空） | 页脚文案 |
+
+也可直接写 KV：`PUT /storage/kv/.../values/config:site`，内容如 `{"siteName":"我的论坛","siteTagline":"..."}`（注意 KV 里键为驼峰 `siteName` 等）。
+
 ### S3 兼容存储（可选）
 
 默认图片（文章插图、回复图片、头像、背景图、板块图标）存 R2，经 `/api/files/*` 同源读取，零配置。
@@ -280,7 +293,7 @@ wrangler secret put TURNSTILE_SECRET_KEY   # Turnstile widget secret
 
 1. 管理后台 → 服务配置 → S3 兼容存储：填 Endpoint / Region / Bucket / AccessKey / SecretKey（可选 `public_base_url` 直链域名），点「测试连通」；
 2. 服务配置 → 站点初始化 → `uploads_storage` 改为 `s3`；
-3. 生效后文章图片、回复图片、背景图、板块图标上传至 S3（头像仍存 KV，经 `/api/avatars/:uid` 读取）；若配置了 `public_base_url`，返回的 URL 为 S3 直链，否则仍走 `/api/files/*` 代理路径。
+3. 生效后**头像、背景图、文章图片、回复图片、板块图标全部上传至 S3**（头像同时更新 `users.avatar_url`，直接读 S3 URL）；若配置了 `public_base_url`，返回的 URL 为 S3 直链，否则仍走 `/api/files/*` 代理路径。
 
 ### 其他可选开关
 

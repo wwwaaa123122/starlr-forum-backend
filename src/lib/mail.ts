@@ -6,6 +6,7 @@
  */
 import type { Env } from '../types';
 import { sha256Hex } from './ids';
+import { getSiteInfo } from './setup';
 
 export interface SentEmail {
   to: string[];
@@ -42,7 +43,7 @@ function textFromHtml(html: string): string {
 }
 
 /** 邮件 HTML 外壳（简洁、移动端友好） */
-export function emailShell(title: string, bodyHtml: string, siteUrl: string): string {
+export function emailShell(title: string, bodyHtml: string, siteUrl: string, siteName = 'Starlr Forum'): string {
   return `<!DOCTYPE html>
 <html><body style="margin:0;padding:0;background:#f4f5f7;font-family:-apple-system,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;">
   <div style="max-width:560px;margin:0 auto;padding:32px 16px;">
@@ -51,7 +52,7 @@ export function emailShell(title: string, bodyHtml: string, siteUrl: string): st
       <div style="font-size:14px;line-height:1.7;color:#3f3f46;">${bodyHtml}</div>
       <hr style="border:none;border-top:1px solid #e4e4e7;margin:24px 0;" />
       <p style="margin:0;font-size:12px;color:#a1a1aa;">
-        Starlr Forum · <a href="${siteUrl}" style="color:#4f46e5;">${siteUrl.replace(/^https?:\/\//, '')}</a><br/>
+        ${siteName} · <a href="${siteUrl}" style="color:#4f46e5;">${siteUrl.replace(/^https?:\/\//, '')}</a><br/>
         如果这不是你的操作，请忽略此邮件。
       </p>
     </div>
@@ -63,7 +64,8 @@ export async function sendEmail(env: Env, to: string | string[], subject: string
   const recipients = (Array.isArray(to) ? to : [to]).map((x) => x.trim()).filter(Boolean);
   if (recipients.length === 0) return false;
 
-  const html = emailShell(subject, bodyHtml, env.SITE_URL);
+  const site = await getSiteInfo(env);
+  const html = emailShell(subject, bodyHtml, env.SITE_URL, site.siteName);
   const text = textFromHtml(html);
 
   if (env.MAIL_TRANSPORT === 'memory') {
@@ -100,16 +102,16 @@ export async function getMailAccounts(env: Env): Promise<MailAccount[]> {
       const cfg = JSON.parse(raw) as { accounts?: { api_key?: string; from?: string }[]; api_key?: string; from?: string };
       // 新结构：accounts 数组
       for (const a of cfg.accounts ?? []) {
-        if (a.api_key && a.api_key !== '-') list.push({ api_key: a.api_key, from: a.from || env.MAIL_FROM || 'Starlr Forum <no-reply@182030.xyz>', source: 'kv' });
+        if (a.api_key && a.api_key !== '-') list.push({ api_key: a.api_key, from: a.from || env.MAIL_FROM || 'Starlr Forum <no-reply@users.invalid>', source: 'kv' });
       }
       // 旧单账号结构兼容
-      if (!cfg.accounts && cfg.api_key) list.push({ api_key: cfg.api_key, from: cfg.from || env.MAIL_FROM || 'Starlr Forum <no-reply@182030.xyz>', source: 'kv' });
+      if (!cfg.accounts && cfg.api_key) list.push({ api_key: cfg.api_key, from: cfg.from || env.MAIL_FROM || 'Starlr Forum <no-reply@users.invalid>', source: 'kv' });
     }
   } catch {
     /* KV 异常时用 env 兜底 */
   }
   if (env.RESEND_API_KEY) {
-    list.push({ api_key: env.RESEND_API_KEY, from: env.MAIL_FROM || 'Starlr Forum <no-reply@182030.xyz>', source: 'env' });
+    list.push({ api_key: env.RESEND_API_KEY, from: env.MAIL_FROM || 'Starlr Forum <no-reply@users.invalid>', source: 'env' });
   }
   return list;
 }

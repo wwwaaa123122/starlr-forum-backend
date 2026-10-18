@@ -20,19 +20,31 @@ export interface SeoConfig {
   baidu_push_token?: string;
 }
 
+/** 未在管理后台配置 canonical_host 时的兜底值；自部署者应在后台「SEO/服务配置」里填自己的域名 */
 export const DEFAULT_CANONICAL_HOST = 'forum.182030.xyz';
+
+function defaultHost(env: Env): string {
+  if (env.SITE_URL) {
+    try {
+      return new URL(env.SITE_URL).host;
+    } catch {
+      /* SITE_URL 非法则继续用兜底 */
+    }
+  }
+  return DEFAULT_CANONICAL_HOST;
+}
 
 export async function getSeoConfig(env: Env): Promise<SeoConfig> {
   try {
     const raw = await env.CACHE.get('config:seo');
     if (raw) {
       const cfg = JSON.parse(raw) as Partial<SeoConfig>;
-      return { canonical_host: cfg.canonical_host || DEFAULT_CANONICAL_HOST, ...cfg } as SeoConfig;
+      return { canonical_host: cfg.canonical_host || defaultHost(env), ...cfg } as SeoConfig;
     }
   } catch {
     /* KV 异常走默认 */
   }
-  return { canonical_host: DEFAULT_CANONICAL_HOST };
+  return { canonical_host: defaultHost(env) };
 }
 
 /** 站点根 URL（无尾斜杠）：用于拼接具体路径 */

@@ -8,7 +8,7 @@ import type { AppEnv } from '../types';
 import { errors, ok } from '../lib/http';
 import { parseJson } from '../lib/validate';
 import { requireRole } from '../middleware/auth';
-import { getSetupConfig, writeSetupConfig } from '../lib/setup';
+import { getSetupConfig, writeSetupConfig, getSiteInfo, writeSiteInfo } from '../lib/setup';
 import { writeAuditLog } from '../lib/audit';
 import { SERVICES, serviceDef, getServiceRaw, putServiceRaw, deleteServiceRaw, describeService } from '../lib/service-config';
 import { s3Test } from '../lib/s3';
@@ -133,10 +133,12 @@ app.post('/:key/test', async (c) => {
 
   if (key === 'mail') {
     if (!body.to) throw errors.badRequest('请填写测试收件邮箱', 'MAIL_TO_REQUIRED');
+    const site = await getSiteInfo(c.env);
     const html = emailShell(
-      'Starlr Forum · 测试邮件',
+      `${site.siteName} · 测试邮件`,
       `<p>这是一封来自管理后台的测试邮件。收到即代表 Resend 配置可用。</p><p class="text-muted" style="color:#888;font-size:12px">${nowIso()}</p>`,
       c.env.SITE_URL,
+      site.siteName,
     );
     // emailShell 返回完整 html，text 版本由 deliver 内部生成——直接复用 deliverViaResend
     const result = await deliverViaResend(c.env, [body.to], 'Starlr Forum · 测试邮件', html, '这是一封来自管理后台的测试邮件。');
@@ -217,6 +219,49 @@ app.patch('/setup', async (c) => {
       registration_enabled: cfg.registrationEnabled,
       registration_email_required: cfg.emailRequired,
       uploads_storage: cfg.uploadsStorage,
+    },
+  });
+});
+
+// ---------------------------------------------------------------
+// 站点信息（/api/admin/site）——站点名/标语/描述/页脚，自部署者改品牌用
+// ---------------------------------------------------------------
+app.get('/site', async (c) => {
+  const site = await getSiteInfo(c.env);
+  return ok(c, {
+    site: {
+      site_name: site.siteName,
+      site_tagline: site.siteTagline,
+      site_description: site.siteDescription,
+      site_footer: site.siteFooter,
+    },
+  });
+});
+
+const siteSchema = z.object({
+  site_name: z.string().min(1).max(60).optional(),
+  site_tagline: z.string().max(120).optional(),
+  site_description: z.string().max(300).optional(),
+  site_footer: z.string().max(120).optional(),
+});
+
+app.patch('/site', async (c) => {
+  const admin = c.get('user')!;
+  const body = await parseJson(c, siteSchema);
+  await writeSiteInfo(c.env, {
+    siteName: body.site_name,
+    siteTagline: body.site_tagline,
+    siteDescription: body.site_description,
+    siteFooter: body.site_footer,
+  });
+  const site = await getSiteInfo(c.env);
+  await writeAuditLog(c, { action: 'admin.site.update', targetType: 'site', targetId: 'config:site', actorId: admin.id });
+  return ok(c, {
+    site: {
+      site_name: site.siteName,
+      site_tagline: site.siteTagline,
+      site_description: site.siteDescription,
+      site_footer: site.siteFooter,
     },
   });
 });
