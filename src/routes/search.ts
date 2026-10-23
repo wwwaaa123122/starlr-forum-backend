@@ -19,7 +19,7 @@ const searchSchema = z.object({
   type: z.enum(['post', 'user']).default('post'),
   category: z.string().max(64).optional(),
   tag: z.string().max(64).optional(),
-  sort: z.enum(['relevant', 'new']).default('relevant'),
+  sort: z.enum(['relevant', 'new', 'hot']).default('relevant'),
   ...paginationSchema.shape,
 });
 
@@ -54,6 +54,7 @@ async function searchPostsByLike(
   tag: string | undefined,
   page: number,
   pageSize: number,
+  sort: 'relevant' | 'new' | 'hot' = 'relevant',
 ) {
   const conditions = [`p.is_deleted = 0`, `(p.title LIKE ? ESCAPE '\\' OR p.content LIKE ? ESCAPE '\\')`];
   const params: unknown[] = [likeTerm, likeTerm];
@@ -73,6 +74,12 @@ async function searchPostsByLike(
   )
     .bind(...params)
     .first<{ total: number }>();
+  const likeOrderBy =
+    sort === 'new'
+      ? 'p.created_at DESC'
+      : sort === 'hot'
+        ? `((p.like_count * 3 + p.reply_count * 2 + p.favorite_count * 2 + p.view_count / 10.0 + 1) / pow(MAX((julianday('now') - julianday(p.created_at)) * 24.0, 0.5), 1.2)) DESC, p.last_reply_at DESC`
+        : 'p.last_reply_at DESC';
   const { results } = await env.DB.prepare(
     `SELECT p.id, p.title, substr(p.content, 1, 200) AS excerpt,
             p.reply_count AS replyCount, p.like_count AS likeCount, p.view_count AS viewCount,
@@ -81,7 +88,7 @@ async function searchPostsByLike(
             u.id AS authorId, u.username_raw AS authorName, u.nickname AS authorNickname, u.avatar_url AS authorAvatar, u.uid AS authorUid, u.role AS authorRole,
             c.name AS categoryName, c.slug AS categorySlug
      ${baseFrom} WHERE ${conditions.join(' AND ')}
-     ORDER BY p.last_reply_at DESC LIMIT ? OFFSET ?`,
+     ORDER BY ${likeOrderBy} LIMIT ? OFFSET ?`,
   )
     .bind(...params, pageSize, page - 1 >= 0 ? (page - 1) * pageSize : 0)
     .all<PostSearchRow>();
@@ -149,7 +156,12 @@ app.get('/', async (c) => {
       )
         .bind(...params)
         .first<{ total: number }>();
-      const orderBy = sort === 'new' ? 'p.created_at DESC' : 'rank';
+      const orderBy =
+        sort === 'new'
+          ? 'p.created_at DESC'
+          : sort === 'hot'
+            ? `((p.like_count * 3 + p.reply_count * 2 + p.favorite_count * 2 + p.view_count / 10.0 + 1) / pow(MAX((julianday('now') - julianday(p.created_at)) * 24.0, 0.5), 1.2)) DESC, p.last_reply_at DESC`
+            : 'rank';
       const { results } = await c.env.DB.prepare(
         `SELECT p.id, p.title, substr(p.content, 1, 200) AS excerpt,
                 p.reply_count AS replyCount, p.like_count AS likeCount, p.view_count AS viewCount,
@@ -175,7 +187,7 @@ app.get('/', async (c) => {
   }
 
   const like = `%${escapeLike(q)}%`;
-  const fallback = await searchPostsByLike(c.env, like, category, tag, page, pageSize);
+  const fallback = await searchPostsByLike(c.env, like, category, tag, page, pageSize, sort);
   const tagMap = await tagsForPosts(c.env, fallback.posts.map((r) => r.id));
   return ok(c, {
     posts: fallback.posts.map((r) => ({ ...r, tags: tagMap.get(r.id) ?? [] })),

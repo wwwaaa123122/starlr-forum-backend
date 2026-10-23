@@ -86,7 +86,7 @@ app.get('/', async (c) => {
     q.sort === 'new'
       ? 'p.is_pinned DESC, p.created_at DESC'
       : q.sort === 'hot'
-        ? `p.is_pinned DESC, (p.like_count * 3 + p.reply_count * 2 + p.view_count / 10) DESC, p.last_reply_at DESC`
+        ? `p.is_pinned DESC, ((p.like_count * 3 + p.reply_count * 2 + p.favorite_count * 2 + p.view_count / 10.0 + 1) / pow(MAX((julianday('now') - julianday(p.created_at)) * 24.0, 0.5), 1.2)) DESC, p.last_reply_at DESC`
         : 'p.is_pinned DESC, COALESCE(p.last_reply_at, p.created_at) DESC';
 
   const baseFrom = `FROM posts p JOIN users u ON u.id = p.author_id JOIN categories c ON c.id = p.category_id ${joins.join(' ')}`;
