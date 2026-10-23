@@ -66,6 +66,7 @@ export const SERVICES: ServiceDef[] = [
       { name: 'google_verify', label: 'Google Search Console', placeholder: 'xxxx', hint: 'google-site-verification 的 content 值' },
       { name: 'bing_verify', label: 'Bing 站长验证', placeholder: 'xxxx', hint: 'msvalidate.01 的 content 值' },
       { name: 'baidu_push_token', label: '百度主动推送 token', secret: true, placeholder: '...', hint: '填后每次发帖自动推送 URL（实时收录）' },
+      { name: 'indexnow_key', label: 'IndexNow 密钥（Bing/Yandex）', secret: true, placeholder: 'uuid 或随机串', hint: '填后自动暴露 /<key>.txt 验证文件，并在每次发帖时向 api.indexnow.org 推送 URL（Bing 实时收录）' },
     ],
     testable: true,
   },

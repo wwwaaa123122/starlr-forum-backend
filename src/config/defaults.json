@@ -2,7 +2,7 @@
   "site": {
     "siteName": "Starlr Forum",
     "siteTagline": "一个轻量、现代的社区论坛",
-    "siteDescription": "一个运行在 Cloudflare 上的轻量级社区。",
+    "siteDescription": "Starlr Forum 是一个轻量、现代的开发者社区论坛：分享技术文章、交流开发经验，话题覆盖开源项目、编程实践与独立开发。运行在 Cloudflare 边缘网络上，全球极速访问。",
     "siteFooter": "© Starlr Forum"
   },
   "setup": {

@@ -18,6 +18,8 @@ export interface SeoConfig {
   bing_verify?: string;
   /** 百度站长平台主动推送 token（data.zz.baidu.com/urls） */
   baidu_push_token?: string;
+  /** IndexNow 密钥（Bing/Yandex 等；填后自动在 /.well-known/ 与根路径暴露 <key>.txt 并推送新帖 URL） */
+  indexnow_key?: string;
 }
 
 /** 未在管理后台配置 canonical_host 时的兜底值；自部署者应在后台「SEO/服务配置」里填自己的域名 */
@@ -168,5 +170,28 @@ export async function baiduPush(env: Env, urls: string[]): Promise<{ ok: boolean
     return { ok: false, message: `推送失败 HTTP ${res.status}: ${data.message ?? ''}` };
   } catch (e) {
     return { ok: false, message: `推送异常：${e instanceof Error ? e.message : String(e)}` };
+  }
+}
+
+/**
+ * IndexNow 推送（Bing / Yandex / Seznam 共享协议）。
+ * 未配置 indexnow_key 时静默跳过；失败只返回错误信息供日志，不影响主流程。
+ */
+export async function indexNowPush(env: Env, urls: string[]): Promise<{ ok: boolean; message: string }> {
+  const cfg = await getSeoConfig(env);
+  if (!cfg.indexnow_key) return { ok: false, message: '未配置 indexnow_key（跳过）' };
+  if (urls.length === 0) return { ok: true, message: '无 URL 需推送' };
+  try {
+    const res = await fetch(`https://api.indexnow.org/indexnow?url=${encodeURIComponent(urls[0])}&key=${encodeURIComponent(cfg.indexnow_key)}&urlList=${urls.map((u) => encodeURIComponent(u)).join(',')}`, {
+      method: 'GET',
+      headers: { 'User-Agent': 'StarlrForum/1.0' },
+    });
+    // 202 = 已受理；200 = 已收录过；400 = key 无效等
+    if (res.status === 200 || res.status === 202) {
+      return { ok: true, message: `IndexNow 推送成功 ${urls.length} 条（HTTP ${res.status}）` };
+    }
+    return { ok: false, message: `IndexNow 推送失败 HTTP ${res.status}` };
+  } catch (e) {
+    return { ok: false, message: `IndexNow 推送异常：${e instanceof Error ? e.message : String(e)}` };
   }
 }

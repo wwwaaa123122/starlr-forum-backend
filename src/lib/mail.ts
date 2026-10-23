@@ -143,11 +143,24 @@ async function sendOne(acc: MailAccount, recipients: string[], subject: string, 
  * Resend 轮询投递：按秒级时间片在账号池中轮转（分摊限额），当前账号失败自动顺移到下一个。
  * 全部失败时返回最后一个错误；账号池为空返回配置提示。
  */
-export async function deliverViaResend(env: Env, recipients: string[], subject: string, html: string, text: string): Promise<MailDeliveryResult> {
+export async function deliverViaResend(env: Env, recipients: string[], subject: string, html: string, text: string, opts?: { accountIndex?: number }): Promise<MailDeliveryResult> {
   const accounts = await getMailAccounts(env);
   if (accounts.length === 0) {
     console.warn('[mail] Resend 未配置（KV 与 env 均无账号），跳过发送:', subject);
     return { ok: false, message: 'Resend 未配置：请在管理后台「服务配置 → 邮件」添加发件账号' };
+  }
+
+  // 指定账号（连通性测试用）：只走该账号，失败即报错，不顺移
+  if (opts?.accountIndex != null) {
+    const idx = opts.accountIndex - 1;
+    if (idx < 0 || idx >= accounts.length) {
+      return { ok: false, message: `账号 #${opts.accountIndex} 不存在（当前账号池共 ${accounts.length} 个）` };
+    }
+    const acc = accounts[idx];
+    const r = await sendOne(acc, recipients, subject, html, text);
+    return r.ok
+      ? { ok: true, message: `发送成功｜账号 #${opts.accountIndex}（${acc.source === 'kv' ? '管理后台' : '环境变量'}）｜From: ${acc.from}` }
+      : { ok: false, message: `账号 #${opts.accountIndex}（From: ${acc.from}）发送失败：${r.message}` };
   }
 
   // 轮询起点：秒级时间片取模（发信低频，秒级轮转即近似均匀分摊）

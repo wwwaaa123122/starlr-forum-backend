@@ -541,6 +541,10 @@ app.post('/posts/:id/restore', requireRole('moderator', 'admin'), async (c) => {
   )
     .bind(nowIso(), postId)
     .run();
+  await c.env.DB.prepare(`UPDATE categories SET post_count = post_count + 1 WHERE id = ?`)
+    .bind(post.category_id)
+    .run();
+  await invalidateCategoryCache(c);
   await writeAuditLog(c, { action: 'admin.post.restore', actorId: admin.id, targetType: 'post', targetId: postId });
   return ok(c, { success: true });
 });
@@ -558,6 +562,13 @@ app.delete('/posts/:id', requireRole('moderator', 'admin'), async (c) => {
   await c.env.DB.prepare(`UPDATE posts SET is_deleted = 1, deleted_at = ?, deleted_by = ? WHERE id = ?`)
     .bind(nowIso(), admin.id, postId)
     .run();
+  await c.env.DB.prepare(`UPDATE categories SET post_count = MAX(post_count - 1, 0) WHERE id = ?`)
+    .bind(post.category_id)
+    .run();
+  await c.env.DB.prepare(`UPDATE users SET post_count = MAX(post_count - 1, 0) WHERE id = ?`)
+    .bind(post.author_id)
+    .run();
+  await invalidateCategoryCache(c);
   await createNotification(c.env, {
     userId: post.author_id,
     actorId: admin.id,
@@ -982,9 +993,17 @@ app.post('/reports/:id/resolve', requireRole('moderator', 'admin'), async (c) =>
     }
   } else if (body.action === 'delete_content') {
     if (target?.targetType === 'post') {
+      const p = await c.env.DB.prepare(`SELECT category_id, author_id FROM posts WHERE id = ? AND is_deleted = 0`)
+        .bind(target.targetId)
+        .first<{ category_id: string; author_id: string }>();
       await c.env.DB.prepare(`UPDATE posts SET is_deleted = 1, deleted_at = ?, deleted_by = ? WHERE id = ?`)
         .bind(nowIso(), admin.id, target.targetId)
         .run();
+      if (p) {
+        await c.env.DB.prepare(`UPDATE categories SET post_count = MAX(post_count - 1, 0) WHERE id = ?`).bind(p.category_id).run();
+        await c.env.DB.prepare(`UPDATE users SET post_count = MAX(post_count - 1, 0) WHERE id = ?`).bind(p.author_id).run();
+        await invalidateCategoryCache(c);
+      }
     } else if (target?.targetType === 'reply') {
       await c.env.DB.prepare(`UPDATE replies SET is_deleted = 1, deleted_at = ?, deleted_by = ? WHERE id = ?`)
         .bind(nowIso(), admin.id, target.targetId)

@@ -122,6 +122,8 @@ app.delete('/:key', async (c) => {
 const testSchema = z.object({
   /** mail 测试用：收件地址 */
   to: z.string().email().optional(),
+  /** mail 测试用：指定发件账号序号（1 起，对应「服务配置 → 邮件」账号池顺序）；不传 = 走轮询 */
+  account: z.coerce.number().int().positive().optional(),
 });
 
 /** POST /:key/test — 连通测试 */
@@ -141,7 +143,7 @@ app.post('/:key/test', async (c) => {
       site.siteName,
     );
     // emailShell 返回完整 html，text 版本由 deliver 内部生成——直接复用 deliverViaResend
-    const result = await deliverViaResend(c.env, [body.to], 'Starlr Forum · 测试邮件', html, '这是一封来自管理后台的测试邮件。');
+    const result = await deliverViaResend(c.env, [body.to], 'Starlr Forum · 测试邮件', html, '这是一封来自管理后台的测试邮件。', { accountIndex: body.account });
     return ok(c, result);
   }
 

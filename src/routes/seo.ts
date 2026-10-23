@@ -335,6 +335,18 @@ app.get('/u/:username', async (c) => {
   );
 });
 
+// ---------------------------------------------------------------- IndexNow key 验证文件
+// 配置了 indexnow_key 后，https://主域/<key>.txt 返回密钥本身（协议要求）
+app.get('/:keyfile', async (c) => {
+  const keyfile = c.req.param('keyfile');
+  if (!/^[a-f0-9-]{8,64}\.txt$/i.test(keyfile)) return spaFallback(c);
+  const cfg = await getSeoConfig(c.env);
+  if (!cfg.indexnow_key || keyfile.toLowerCase() !== `${cfg.indexnow_key.toLowerCase()}.txt`) {
+    return spaFallback(c);
+  }
+  return c.text(cfg.indexnow_key);
+});
+
 app.get('/explore', async (c) => {
   if (!isCrawler(c)) return spaFallback(c);
   const cfg = await getSeoConfig(c.env);
