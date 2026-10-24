@@ -498,11 +498,3 @@ starlr-forum-backend/
 ## 许可
 
 本项目基于 [GPL-3.0-or-later](./LICENSE) 开源。
-
-- 可自由使用、学习、修改、分发；
-- 二次开发作品必须同样以 GPL-3.0 开源并保留原始版权声明；
-- 按「现状」提供，不附带任何担保；
-- 版权所有 © 2026 wwwaaa123122。
-
-第三方依赖均为 MIT / Apache-2.0 / ISC 等宽松许可（Hono、Zod、TypeScript、Vitest、Wrangler），与 GPL-3.0 兼容；
-仓库内不含第三方版权素材（图标为项目自绘，字体走系统字体栈）。
