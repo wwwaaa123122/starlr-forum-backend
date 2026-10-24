@@ -260,10 +260,8 @@ app.patch('/:id', requireAuth, async (c) => {
     .first<{ id: string; author_id: string; category_id: string; is_deleted: number }>();
   if (!post || post.is_deleted) throw errors.notFound('帖子不存在');
 
-  const canModerate = user.role === 'admin' || user.role === 'moderator';
-  if (post.author_id !== user.id && !canModerate) throw errors.forbidden('只能编辑自己的帖子');
-  // 版主代编辑需辖区校验：admin 全站放行，moderator 仅限所辖版块（作者本人编辑自己帖子不受此限）
-  if (post.author_id !== user.id) await assertCategoryScope(c.env, user, post.category_id);
+  // 仅作者本人可编辑（管理员/版主也不得代编辑他人帖子）
+  if (post.author_id !== user.id) throw errors.forbidden('只能编辑自己的帖子');
 
   const sets: string[] = [];
   const values: unknown[] = [];
@@ -508,24 +506,48 @@ app.get('/:id/replies', async (c) => {
   const { page, pageSize } = paginationSchema.parse(Object.fromEntries(new URL(c.req.url).searchParams));
   const offset = (page - 1) * pageSize;
 
-  const post = await c.env.DB.prepare(`SELECT id, is_deleted FROM posts WHERE id = ?`)
+  const viewer = c.get('user');
+  const post = await c.env.DB.prepare(`SELECT id, author_id, is_deleted, category_id FROM posts WHERE id = ?`)
     .bind(id)
-    .first<{ id: string; is_deleted: number }>();
+    .first<{ id: string; author_id: string; is_deleted: number; category_id: string }>();
   if (!post) throw errors.notFound('帖子不存在');
 
+  // 已删除帖子的回复列表：仅管理员与辖区版主可进入（供复核）；其他人 404
+  if (post.is_deleted) {
+    let canModerate = Boolean(viewer && viewer.role === 'admin');
+    if (!canModerate && viewer && viewer.role === 'moderator') {
+      const scope = await moderationScope(c.env, viewer);
+      canModerate = inScope(scope, post.category_id);
+    }
+    if (!canModerate) throw errors.notFound('帖子不存在');
+  }
+
+  // 已删除回复：仅管理员与辖区版主可见（isDeleted 标记返回，供复核）；其他人不可见
+  let canViewDeleted = false;
+  if (viewer) {
+    if (viewer.role === 'admin') canViewDeleted = true;
+    else if (viewer.role === 'moderator') {
+      const scope = await moderationScope(c.env, viewer);
+      canViewDeleted = inScope(scope, post.category_id);
+    }
+  }
+  const deletedFilter = canViewDeleted ? '' : ' AND r.is_deleted = 0';
+  const deletedFilterCount = canViewDeleted ? '' : ' AND is_deleted = 0';
+
   const countRow = await c.env.DB.prepare(
-    `SELECT COUNT(*) AS total FROM replies WHERE post_id = ? AND is_deleted = 0`,
+    `SELECT COUNT(*) AS total FROM replies WHERE post_id = ?${deletedFilterCount}`,
   )
     .bind(id)
     .first<{ total: number }>();
 
-  const currentUserId = c.get('user')?.id ?? '';
+  const currentUserId = viewer?.id ?? '';
   const likedExpr = currentUserId
     ? `EXISTS(SELECT 1 FROM likes l WHERE l.target_type = 'reply' AND l.target_id = r.id AND l.user_id = ?) AS liked`
     : '0 AS liked';
   const likedParam = currentUserId ? [currentUserId] : [];
   const { results } = await c.env.DB.prepare(
     `SELECT r.id, r.content, r.parent_id AS parentReplyId, r.reply_to_user_id AS replyToUserId,
+            r.is_deleted AS isDeleted,
             r.like_count AS likeCount, r.created_at AS createdAt, r.updated_at AS updatedAt,
             r.edited_at AS editedAt,
             u.id AS authorId, u.uid AS authorUid, u.username_raw AS authorName, u.nickname AS authorNickname, u.avatar_url AS authorAvatar, u.role AS authorRole,
@@ -534,7 +556,7 @@ app.get('/:id/replies', async (c) => {
      FROM replies r
      JOIN users u ON u.id = r.author_id
      LEFT JOIN users ru ON ru.id = r.reply_to_user_id
-     WHERE r.post_id = ? AND r.is_deleted = 0
+     WHERE r.post_id = ?${deletedFilter}
      ORDER BY r.created_at ASC LIMIT ? OFFSET ?`,
   )
     .bind(...likedParam, id, pageSize, offset)

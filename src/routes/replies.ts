@@ -31,12 +31,8 @@ app.patch('/:id', requireAuth, async (c) => {
     .bind(id)
     .first<{ id: string; author_id: string; is_deleted: number; category_id: string }>();
   if (!reply || reply.is_deleted) throw errors.notFound('回复不存在');
-  const canModerate = user.role === 'admin' || user.role === 'moderator';
-  if (reply.author_id !== user.id && !canModerate) {
-    throw errors.forbidden('只能编辑自己的回复');
-  }
-  // 版主代编辑需辖区校验：admin 全站放行，moderator 仅限回复所属帖子的版块（作者本人编辑不受此限）
-  if (reply.author_id !== user.id) await assertCategoryScope(c.env, user, reply.category_id);
+  // 仅作者本人可编辑（管理员/版主也不得代编辑他人回复）
+  if (reply.author_id !== user.id) throw errors.forbidden('只能编辑自己的回复');
 
   await c.env.DB.prepare(`UPDATE replies SET content = ?, updated_at = ?, edited_at = ? WHERE id = ?`)
     .bind(body.content, nowIso(), nowIso(), id)
