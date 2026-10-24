@@ -307,6 +307,18 @@ app.patch('/:id', requireAuth, async (c) => {
     if (batches.length > 0) await c.env.DB.batch(batches);
   }
 
+  // SEO：编辑后重新推送 URL（异步，不阻塞响应）
+  try {
+    c.executionCtx.waitUntil(
+      (async () => {
+        const { repushPostUrl } = await import('../lib/seo-push');
+        await repushPostUrl(c.env, id);
+      })().catch(() => undefined),
+    );
+  } catch {
+    /* 无 ExecutionContext（测试环境）：跳过推送 */
+  }
+
   return ok(c, { success: true });
 });
 
@@ -332,6 +344,19 @@ app.delete('/:id', requireAuth, async (c) => {
   )
     .bind(nowIso(), user.id, id)
     .run();
+
+  // SEO：通知搜索引擎移除已删 URL（异步，不阻塞响应）
+  try {
+    c.executionCtx.waitUntil(
+      (async () => {
+        const { removePostUrl } = await import('../lib/seo-push');
+        await removePostUrl(c.env, id);
+      })().catch(() => undefined),
+    );
+  } catch {
+    /* 无 ExecutionContext（测试环境）：跳过 */
+  }
+
   return ok(c, { success: true });
 });
 

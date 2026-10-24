@@ -21,6 +21,9 @@
     "not_found_handling": "single-page-application",
     "run_worker_first": ["/api/*", "/oauth/*", "/.well-known/*", "/", "/post/*", "/u/*", "/c/*", "/categories", "/explore", "/terms", "/privacy", "/verify-email", "/robots.txt", "/sitemap.xml", "/feed.xml", "/800ed6738c694611a44d2a8c5dae1657.txt"]
   },
+  "triggers": {
+    "crons": ["17 3 * * *"]
+  },
   "d1_databases": [
     {
       "binding": "DB",

@@ -1149,3 +1149,64 @@ app.get('/audit-logs', requireAdmin, async (c) => {
 });
 
 export default app;
+
+// ---------------------------------------------------------------
+// 搜索引擎推送记录（seo_push_log）
+// ---------------------------------------------------------------
+
+const pushQuerySchema = z.object({
+  ...paginationSchema.shape,
+  channel: z.enum(['baidu', 'indexnow']).optional(),
+  status: z.enum(['ok', 'failed']).optional(),
+});
+
+/** 推送记录列表（帖子标题 join 帖子表；帖子已硬删时标题为空） */
+app.get('/seo-pushes', requireAdmin, async (c) => {
+  const { page, pageSize, channel, status } = parseQuery(c, pushQuerySchema);
+  const offset = (page - 1) * pageSize;
+  const conds: string[] = [];
+  const params: unknown[] = [];
+  if (channel) { conds.push('l.channel = ?'); params.push(channel); }
+  if (status) { conds.push('l.status = ?'); params.push(status); }
+  const whereSql = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
+  const countRow = await c.env.DB.prepare(`SELECT COUNT(*) AS total FROM seo_push_log l ${whereSql}`)
+    .bind(...params)
+    .first<{ total: number }>();
+  const { results } = await c.env.DB.prepare(
+    `SELECT l.id, l.post_id AS postId, l.url, l.channel, l.event, l.status, l.http_code AS httpCode,
+            l.attempts, l.message, l.created_at AS createdAt, p.title
+     FROM seo_push_log l LEFT JOIN posts p ON p.id = l.post_id
+     ${whereSql} ORDER BY l.created_at DESC LIMIT ? OFFSET ?`,
+  )
+    .bind(...params, pageSize, offset)
+    .all();
+  // 汇总：各渠道最近 24h 成功/失败
+  const stats = await c.env.DB.prepare(
+    `SELECT channel, status, COUNT(*) AS n FROM seo_push_log
+     WHERE created_at >= datetime('now', '-1 day') GROUP BY channel, status`,
+  ).all<{ channel: string; status: string; n: number }>();
+  return ok(c, {
+    logs: results ?? [],
+    pagination: paginationMeta(page, pageSize, countRow?.total ?? 0),
+    stats: stats.results ?? [],
+  });
+});
+
+/** 手动重试：对指定 post 的失败记录重新推送（两渠道都试） */
+app.post('/seo-pushes/:postId/retry', requireAdmin, async (c) => {
+  const postId = c.req.param('postId');
+  const post = await c.env.DB.prepare(`SELECT id FROM posts WHERE id = ? AND is_deleted = 0`)
+    .bind(postId)
+    .first<{ id: string }>();
+  if (!post) throw errors.notFound('帖子不存在或已删除，无法推送');
+  const { pushPostUrl } = await import('../lib/seo-push');
+  await pushPostUrl(c.env, postId);
+  return ok(c, { success: true });
+});
+
+/** 全量校验：把 30 天内未成功推送的帖子全部重推（单次最多 500 篇） */
+app.post('/seo-pushes/validate-all', requireAdmin, async (c) => {
+  const { pushAllPosts } = await import('../lib/seo-push');
+  const count = await pushAllPosts(c.env);
+  return ok(c, { pushed: count });
+});

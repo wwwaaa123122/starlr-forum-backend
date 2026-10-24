@@ -9,7 +9,7 @@
  */
 import { getSetupConfig, getSiteInfo } from './lib/setup';
 import { Hono } from 'hono';
-import type { AppEnv } from './types';
+import type { AppEnv, Env } from './types';
 import { ApiError, jsonError } from './lib/http';
 import { optionalAuth } from './middleware/auth';
 
@@ -171,4 +171,19 @@ app.notFound(async (c) => {
   return c.env.ASSETS.fetch(c.req.raw);
 });
 
-export default app;
+// ---------- Cron：每日全量 SEO 推送校验（仅 x Worker 配置了触发器） ----------
+export default Object.assign(app, {
+  async scheduled(_event: ScheduledController, env: AppEnv['Bindings'], ctx: ExecutionContext) {
+    ctx.waitUntil(
+      (async () => {
+        try {
+          const { pushAllPosts } = await import('./lib/seo-push');
+          const n = await pushAllPosts(env);
+          console.log(`[cron] SEO 全量校验完成：重推 ${n} 篇`);
+        } catch (e) {
+          console.error('[cron] SEO 全量校验失败:', e instanceof Error ? e.message : e);
+        }
+      })(),
+    );
+  },
+});
