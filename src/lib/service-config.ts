@@ -24,7 +24,6 @@ export interface ServiceDef {
   /** KV 键名 */
   kvKey: string;
   label: string;
-  description: string;
   fields: ServiceField[];
   /** 有无连通测试 */
   testable: boolean;
@@ -35,7 +34,6 @@ export const SERVICES: ServiceDef[] = [
     key: 'mail',
     kvKey: 'config:mail',
     label: '邮件（Resend）',
-    description: '注册验证、找回密码、管理告警邮件。支持多发件账号轮询（分摊限额），某账号失败自动切换到下一个；环境变量里的 RESEND_API_KEY 会作为兜底账号自动加入轮询池。',
     fields: [],
     testable: true,
   },
@@ -43,15 +41,14 @@ export const SERVICES: ServiceDef[] = [
     key: 's3',
     kvKey: 'config:s3',
     label: 'S3 兼容存储',
-    description: 'S3 兼容对象存储（AWS S3 / Cloudflare R2 S3 API / Backblaze B2 / 阿里云 OSS 等），用于后续备份与存储扩展。',
     fields: [
       { name: 'endpoint', label: 'Endpoint', placeholder: 'https://<account_id>.r2.cloudflarestorage.com' },
-      { name: 'region', label: 'Region', placeholder: 'auto', hint: 'R2 填 auto' },
+      { name: 'region', label: 'Region', placeholder: 'auto' },
       { name: 'bucket', label: 'Bucket', placeholder: 'bucket 名' },
       { name: 'access_key_id', label: 'Access Key ID', placeholder: '...' },
       { name: 'secret_access_key', label: 'Secret Access Key', secret: true, placeholder: '...' },
-      { name: 'path_style', label: 'Path-style 访问', placeholder: 'true / false', hint: 'R2 / B2 / OSS 填 true；AWS 官方 S3 填 false' },
-      { name: 'public_base_url', label: '公开访问基址', placeholder: 'https://cdn.example.com', hint: '可选；对象对外访问 URL 前缀' },
+      { name: 'path_style', label: 'Path-style 访问', placeholder: 'true / false' },
+      { name: 'public_base_url', label: '公开访问基址', placeholder: 'https://cdn.example.com' },
     ],
     testable: true,
   },
@@ -59,14 +56,13 @@ export const SERVICES: ServiceDef[] = [
     key: 'seo',
     kvKey: 'config:seo',
     label: 'SEO / 搜索引擎',
-    description: 'canonical 主域（唯一对外收录域名）、站长平台验证码、百度主动推送 token。留空即用 SITE_URL 的域名。',
     fields: [
-      { name: 'canonical_host', label: 'canonical 主域', placeholder: 'forum.example.com', hint: '不带协议；多个域指向同一站点时，canonical 与 sitemap 都归并到这里' },
-      { name: 'baidu_verify', label: '百度站长验证码', placeholder: 'code-xxxx', hint: 'baidu-site-verification 的 content 值' },
-      { name: 'google_verify', label: 'Google Search Console', placeholder: 'xxxx', hint: 'google-site-verification 的 content 值' },
-      { name: 'bing_verify', label: 'Bing 站长验证', placeholder: 'xxxx', hint: 'msvalidate.01 的 content 值' },
-      { name: 'baidu_push_token', label: '百度主动推送 token', secret: true, placeholder: '...', hint: '填后每次发帖自动推送 URL（实时收录）' },
-      { name: 'indexnow_key', label: 'IndexNow 密钥（Bing/Yandex）', secret: true, placeholder: 'uuid 或随机串', hint: '填后自动暴露 /<key>.txt 验证文件，并在每次发帖时向 api.indexnow.org 推送 URL（Bing 实时收录）' },
+      { name: 'canonical_host', label: 'canonical 主域', placeholder: 'forum.example.com' },
+      { name: 'baidu_verify', label: '百度站长验证码', placeholder: 'code-xxxx' },
+      { name: 'google_verify', label: 'Google Search Console', placeholder: 'xxxx' },
+      { name: 'bing_verify', label: 'Bing 站长验证', placeholder: 'xxxx' },
+      { name: 'baidu_push_token', label: '百度主动推送 token', secret: true, placeholder: '...' },
+      { name: 'indexnow_key', label: 'IndexNow 密钥（Bing/Yandex）', secret: true, placeholder: 'uuid 或随机串' },
     ],
     testable: true,
   },
@@ -74,11 +70,10 @@ export const SERVICES: ServiceDef[] = [
     key: 'oauth-github',
     kvKey: 'config:oauth:github',
     label: 'GitHub OAuth 登录',
-    description: 'GitHub OAuth App 凭据（github.com/settings/developers），回调地址填 <你的站点>/oauth/callback/github。',
     fields: [
       { name: 'client_id', label: 'Client ID', placeholder: 'Ov23li...' },
       { name: 'client_secret', label: 'Client Secret', secret: true, placeholder: '...' },
-      { name: 'callback_origin', label: '回调基址', placeholder: 'https://api.example.com', hint: '留空则用 SITE_URL；前后端分离部署时填 API 所在域名' },
+      { name: 'callback_origin', label: '回调基址', placeholder: 'https://api.example.com' },
     ],
     testable: true,
   },
@@ -121,7 +116,6 @@ function mask(value: string): string {
 export interface ServiceView {
   key: string;
   label: string;
-  description: string;
   testable: boolean;
   configured: boolean;
   requiredMissing: boolean;
@@ -141,7 +135,7 @@ export async function describeService(env: Env, def: ServiceDef): Promise<Servic
       name: f.name,
       label: f.label,
       secret: Boolean(f.secret),
-      hint: f.hint ?? null,
+      hint: null,
       placeholder: f.placeholder ?? null,
       /** 有效值：secret 掩码，普通字段明文（便于核对） */
       value: effective ? (f.secret ? mask(effective) : effective) : null,
@@ -152,7 +146,6 @@ export async function describeService(env: Env, def: ServiceDef): Promise<Servic
   return {
     key: def.key,
     label: def.label,
-    description: def.description,
     testable: def.testable,
     configured: fields.some((f) => f.source !== null),
     fields,
