@@ -86,7 +86,7 @@ describe('回复', () => {
     expect(r2.status).toBe(201);
 
     const replies = await req(`/api/posts/${id}/replies`);
-    const second = replies.body.replies.find((r: { id: string }) => r.id === r2.body.id);
+    const second = (replies.body.replies ?? []).find((r: { id: string }) => r.id === r2.body.id);
     expect(second.parentReplyId).toBe(r1.body.id);
     expect(second.replyToUserName).toBe('quoterb');
   });

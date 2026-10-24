@@ -72,16 +72,18 @@ async function pushChannel(
     /* 日志表不可用时不去重，照常推送 */
   }
 
-  let last: { ok: boolean; message: string } = { ok: false, message: '未执行' };
+  let last: { ok: boolean; message: string; httpCode?: number } = { ok: false, message: '未执行' };
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     last = await fn();
     if (last.ok) {
-      await logPush(env, { postId, url, channel, event, status: 'ok', attempts: attempt, message: last.message });
+      await logPush(env, { postId, url, channel, event, status: 'ok', httpCode: last.httpCode, attempts: attempt, message: last.message });
       return true;
     }
+    // 429 = 被限流，重试只会加重；直接记录失败（保留最后一次 http 状态码）
+    if (last.httpCode === 429) break;
     if (attempt < MAX_ATTEMPTS) await sleep(RETRY_DELAYS_MS[attempt - 1]);
   }
-  await logPush(env, { postId, url, channel, event, status: 'failed', attempts: MAX_ATTEMPTS, message: last.message });
+  await logPush(env, { postId, url, channel, event, status: 'failed', httpCode: last.httpCode, attempts: MAX_ATTEMPTS, message: last.message });
   return false;
 }
 
@@ -155,10 +157,29 @@ export async function pushAllPosts(env: Env, limit = 500): Promise<number> {
     .bind(limit)
     .all<{ id: string }>();
   const ids = (results ?? []).map((r) => r.id);
-  for (const id of ids) {
-    const url = canonicalUrl(cfg, `/post/${id}`);
-    if (cfg.baidu_push_token) await pushChannel(env, 'baidu', id, url, 'cron', () => baiduPush(env, [url]));
-    if (cfg.indexnow_key) await pushChannel(env, 'indexnow', id, url, 'cron', () => indexNowPush(env, [url]));
+  if (ids.length === 0) return 0;
+  // 百度：批量一次提交（协议支持 \n 分隔多 URL）
+  if (cfg.baidu_push_token) {
+    const urls = ids.map((id) => canonicalUrl(cfg, `/post/${id}`));
+    const r = await baiduPush(env, urls);
+    for (const id of ids) {
+      await logPush(env, {
+        postId: id, url: canonicalUrl(cfg, `/post/${id}`), channel: 'baidu', event: 'cron',
+        status: r.ok ? 'ok' : 'failed', httpCode: r.httpCode, attempts: 1, message: r.message,
+      });
+    }
+  }
+  // IndexNow：一次批量请求（urlList），避免逐帖请求触发 429 限流
+  if (cfg.indexnow_key) {
+    const urls = ids.map((id) => canonicalUrl(cfg, `/post/${id}`));
+    const r = await indexNowPush(env, urls);
+    // 每条帖子都记一行日志（成功/失败一致），便于后台按帖查看
+    for (const id of ids) {
+      await logPush(env, {
+        postId: id, url: canonicalUrl(cfg, `/post/${id}`), channel: 'indexnow', event: 'cron',
+        status: r.ok ? 'ok' : 'failed', httpCode: r.httpCode, attempts: 1, message: r.message,
+      });
+    }
   }
   return ids.length;
 }

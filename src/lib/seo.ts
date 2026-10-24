@@ -154,7 +154,7 @@ ${botBody}
 }
 
 /** 百度主动推送（实时提交，收录加速）；失败静默（只返回错误信息供日志） */
-export async function baiduPush(env: Env, urls: string[]): Promise<{ ok: boolean; message: string }> {
+export async function baiduPush(env: Env, urls: string[]): Promise<PushResult> {
   const cfg = await getSeoConfig(env);
   if (!cfg.baidu_push_token) return { ok: false, message: '未配置 baidu_push_token' };
   try {
@@ -165,9 +165,9 @@ export async function baiduPush(env: Env, urls: string[]): Promise<{ ok: boolean
     });
     const data = (await res.json().catch(() => ({}))) as { success?: number; remain?: number; message?: string };
     if (res.ok && data.success !== undefined) {
-      return { ok: true, message: `推送成功 ${data.success} 条，剩余配额 ${data.remain ?? '?'}` };
+      return { ok: true, message: `推送成功 ${data.success} 条，剩余配额 ${data.remain ?? '?'}`, httpCode: res.status };
     }
-    return { ok: false, message: `推送失败 HTTP ${res.status}: ${data.message ?? ''}` };
+    return { ok: false, message: `推送失败 HTTP ${res.status}: ${data.message ?? ''}`, httpCode: res.status };
   } catch (e) {
     return { ok: false, message: `推送异常：${e instanceof Error ? e.message : String(e)}` };
   }
@@ -177,7 +177,8 @@ export async function baiduPush(env: Env, urls: string[]): Promise<{ ok: boolean
  * IndexNow 推送（Bing / Yandex / Seznam 共享协议）。
  * 未配置 indexnow_key 时静默跳过；失败只返回错误信息供日志，不影响主流程。
  */
-export async function indexNowPush(env: Env, urls: string[]): Promise<{ ok: boolean; message: string }> {
+export interface PushResult { ok: boolean; message: string; httpCode?: number }
+export async function indexNowPush(env: Env, urls: string[]): Promise<PushResult> {
   const cfg = await getSeoConfig(env);
   if (!cfg.indexnow_key) return { ok: false, message: '未配置 indexnow_key（跳过）' };
   if (urls.length === 0) return { ok: true, message: '无 URL 需推送' };
@@ -188,9 +189,10 @@ export async function indexNowPush(env: Env, urls: string[]): Promise<{ ok: bool
     });
     // 202 = 已受理；200 = 已收录过；400 = key 无效等
     if (res.status === 200 || res.status === 202) {
-      return { ok: true, message: `IndexNow 推送成功 ${urls.length} 条（HTTP ${res.status}）` };
+      return { ok: true, message: `IndexNow 推送成功 ${urls.length} 条（HTTP ${res.status}）`, httpCode: res.status };
     }
-    return { ok: false, message: `IndexNow 推送失败 HTTP ${res.status}` };
+    // 429 = 限流（Workers 共享出口 IP 常见）；403 = key/主机未验证
+    return { ok: false, message: `IndexNow 推送失败 HTTP ${res.status}`, httpCode: res.status };
   } catch (e) {
     return { ok: false, message: `IndexNow 推送异常：${e instanceof Error ? e.message : String(e)}` };
   }
