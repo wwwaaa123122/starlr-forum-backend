@@ -41,11 +41,12 @@
     "PASSWORD_ITERATIONS": "100000",
     "TURNSTILE_SITE_KEY": "0x4AAAAAAFOSQFHmv_Mdvjrg",
     "SSO_ALLOWED_ORIGINS": "https://zako.mom,https://x.182030.xyz",
-    "OAUTH_REDIRECT_ORIGINS": "https://x.182030.xyz,https://forum.182030.xyz,https://f.182030.xyz",
+    "OAUTH_REDIRECT_ORIGINS": "https://x.182030.xyz,https://forum.182030.xyz,https://f.182030.xyz,https://frontend.182030.xyz",
     "MAIL_FROM": "Starlr Forum <no-reply@182030.xyz>",
     // 跨域前端白名单（逗号分隔）。f.182030.xyz = 纯前端 Worker，浏览器直连本 API；
     // zako.mom = mc-srv-worker（MC 免端口域名生成器）接入论坛账号系统，浏览器直连本 API 登录。
-    "ALLOWED_ORIGINS": "https://f.182030.xyz,https://zako.mom"
+    // frontend.182030.xyz = 经典版前端 Worker（forum-frontend-classic）。
+    "ALLOWED_ORIGINS": "https://f.182030.xyz,https://zako.mom,https://frontend.182030.xyz"
   },
   // 生产密钥通过 wrangler secret put 设置（本 Worker 需单独配置）：
   //   JWT_SIGNING_KEYS     : node scripts/generate-jwt-keys.mjs --print | wrangler secret put JWT_SIGNING_KEYS --name forum-backend
