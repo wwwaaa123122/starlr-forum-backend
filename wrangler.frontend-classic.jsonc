@@ -1,25 +1,31 @@
-// Starlr Forum — 经典版前端 Worker（frontend.182030.xyz）
+// Starlr Forum — 经典版前端 Worker（starlr.tech 主域 + frontend.182030.xyz）
 //
 // 托管 starlr-forum-frontend（经典版，shadcn/ui 直角风格）构建产物 dist-f，
-// 浏览器跨域直连独立后端 forum-backend（i.182030.xyz）。
-// 零数据绑定；src/index-f.ts 复用 f 站薄 SEO 入口（robots/sitemap/feed 302 主域）。
+// 经 service binding MAIN 代理 /api /oauth /.well-known 到主 Worker（xingchen-forum-x，同库同 JWT 密钥），
+// 使 Android APK（API_BASE_URL=starlr.tech）与登录桥接页 app-auth.html 继续工作。
+// 零数据绑定；src/index-f.ts 含薄 SEO 入口（robots/sitemap/feed 302 主域）。
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "main": "src/index-f.ts",
   "name": "forum-frontend-classic",
-  "routes": [{ "pattern": "frontend.182030.xyz", "custom_domain": true }],
+  "routes": [
+    { "pattern": "starlr.tech/*", "zone_name": "starlr.tech" },
+    { "pattern": "www.starlr.tech/*", "zone_name": "starlr.tech" },
+    { "pattern": "frontend.182030.xyz", "custom_domain": true }
+  ],
   "compatibility_date": "2025-10-01",
   "assets": {
     "directory": "../starlr-forum-frontend/dist-f",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/robots.txt", "/sitemap.xml", "/feed.xml"]
+    "run_worker_first": ["/robots.txt", "/sitemap.xml", "/feed.xml", "/api/*", "/oauth/*", "/.well-known/*"]
   },
-  "observability": {
-    "enabled": true
-  },
+  "services": [
+    { "binding": "MAIN", "service": "xingchen-forum-x" }
+  ],
+  "observability": { "enabled": true },
   "vars": {
-    "SITE_URL": "https://frontend.182030.xyz",
+    "SITE_URL": "https://starlr.tech",
     "CANONICAL_SITE_URL": "https://starlr.tech"
   }
 }
