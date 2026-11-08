@@ -26,7 +26,7 @@ function siteRoot(c: { env: AppEnv['Bindings'] }): string {
 const MAIN_ORIGIN = 'https://x.182030.xyz';
 function proxyToMain(c: { env: AppEnv['Bindings']; req: { raw: Request } }): Response | Promise<Response> {
   const main = (c.env as { MAIN?: Fetcher }).MAIN;
-  if (!main) return c.body(null, 502);
+  if (!main) return new Response(null, { status: 502 });
   const url = new URL(c.req.raw.url);
   const out = new Request(`${MAIN_ORIGIN}${url.pathname}${url.search}`, c.req.raw);
   return main.fetch(out);
