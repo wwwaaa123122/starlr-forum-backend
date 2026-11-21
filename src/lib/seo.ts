@@ -160,7 +160,8 @@ export async function baiduPush(env: Env, urls: string[]): Promise<PushResult> {
   const cfg = await getSeoConfig(env);
   if (!cfg.baidu_push_token) return { ok: false, message: '未配置 baidu_push_token' };
   try {
-    const res = await fetch(`http://data.zz.baidu.com/urls?site=${cfg.canonical_host}&token=${cfg.baidu_push_token}`, {
+    // HTTPS：token 在 query string 中，明文 HTTP 会把它暴露给链路上任何中间节点
+    const res = await fetch(`https://data.zz.baidu.com/urls?site=${cfg.canonical_host}&token=${cfg.baidu_push_token}`, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain' },
       body: urls.join('\n'),
