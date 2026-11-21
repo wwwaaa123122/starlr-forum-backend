@@ -73,12 +73,24 @@ describe('GET /api/search（帖子）', () => {
     expect(res.status).toBe(200); // ftsPhrase 转义双引号，至多返回空结果
   });
 
-  it('LIKE 通配符注入不放大结果集', async () => {
-    const normal = await req<{ posts: unknown[] }>('/api/search?q=React');
-    const injected = await req<{ posts: unknown[] }>('/api/search?q=' + encodeURIComponent('%25%25%25'));
+  it('LIKE 通配符注入不放大结果集（%% 是字面量而非通配）', async () => {
+    // 数据库里不存在字面 %% 字符串 → 转义正确时结果必为空；
+    // 若 escapeLike 失效，%% 会作为通配符匹配全部帖子
+    const injected = await req<{ posts: unknown[]; mode: string }>(
+      '/api/search?q=' + encodeURIComponent('%%') + '&pageSize=50',
+    );
     expect(injected.status).toBe(200);
-    // %% 转义后应匹配字面 %%，而非通配全部 —— 结果集不得多于正常查询
-    expect(injected.body.posts.length).toBeLessThanOrEqual(Math.max(normal.body.posts.length, 0) + 0 || injected.body.posts.length);
+    expect(injected.body.mode).toBe('like'); // 3 字符以下走 LIKE
+    expect(injected.body.posts).toEqual([]);
+  });
+
+  it('下划线通配符同样被转义（_ 是单字符通配）', async () => {
+    // 库中无字面 x_ → 转义正确时为空；失效时 _ 匹配任意单字符可能命中
+    const injected = await req<{ posts: unknown[]; mode: string }>(
+      '/api/search?q=' + encodeURIComponent('x_') + '&pageSize=50',
+    );
+    expect(injected.status).toBe(200);
+    expect(injected.body.mode).toBe('like');
     expect(Array.isArray(injected.body.posts)).toBe(true);
   });
 
