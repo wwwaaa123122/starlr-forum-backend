@@ -68,7 +68,9 @@ export function s3ObjectUrl(cfg: S3Config, key = ''): URL {
   const base = cfg.endpoint.replace(/\/+$/, '');
   if (cfg.path_style) return new URL(`${base}/${cfg.bucket}${key ? `/${key}` : ''}`);
   const u = new URL(base);
-  return new URL(`${u.protocol}//${cfg.bucket}.${u.host}${u.pathname}${key ? `/${key}` : ''}`);
+  // u.pathname 为 "/" 时不能直接拼（会产生 //key 双斜杠，对象寻址出错）
+  const path = u.pathname.replace(/\/+$/, '');
+  return new URL(`${u.protocol}//${cfg.bucket}.${u.host}${path}${key ? `/${key}` : ''}`);
 }
 
 /** 签名请求（GET/HEAD/PUT/DELETE，空载荷） */
