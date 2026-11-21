@@ -36,6 +36,8 @@ export default defineWorkersConfig(async () => {
               TURNSTILE_DISABLED: 'true',
               MAIL_TRANSPORT: 'memory',
               MAIL_FROM: '星辰旅人论坛测试 <no-reply@test.local>',
+              // 邮件账号池测试用：模拟"env secret 兜底账号"
+              RESEND_API_KEY: 'test-env-resend-key',
               PASSWORD_ITERATIONS: '1000',
               JWT_ISSUER: 'https://forum.test',
               JWT_AUDIENCE: 'api',
