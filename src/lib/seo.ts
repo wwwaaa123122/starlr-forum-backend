@@ -141,8 +141,10 @@ ${robots}
 <meta property="og:title" content="${safeTitle}" />
 <meta property="og:description" content="${safeDescription}" />
 <meta property="og:url" content="${canonical}" />
+<meta property="og:image" content="${canonicalUrl(cfg, '/icon-192.png')}" />
 <meta property="og:locale" content="zh_CN" />
 <meta name="twitter:card" content="summary" />
+<meta name="twitter:image" content="${canonicalUrl(cfg, '/icon-192.png')}" />
 ${verifyMetas(cfg, host)}
 <link rel="alternate" type="application/rss+xml" title="${siteName}" href="${canonicalUrl(cfg, '/feed.xml')}" />
 ${jsonLd}
