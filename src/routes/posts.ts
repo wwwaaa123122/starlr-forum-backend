@@ -339,11 +339,14 @@ app.delete('/:id', requireAuth, async (c) => {
   if (post.author_id !== user.id) await assertCategoryScope(c.env, user, post.category_id);
   if (post.is_deleted) throw errors.badRequest('帖子已处于删除状态');
 
-  await c.env.DB.prepare(
-    `UPDATE posts SET is_deleted = 1, deleted_at = ?, deleted_by = ? WHERE id = ?`,
-  )
-    .bind(nowIso(), user.id, id)
-    .run();
+  await c.env.DB.batch([
+    c.env.DB.prepare(`UPDATE posts SET is_deleted = 1, deleted_at = ?, deleted_by = ? WHERE id = ?`)
+      .bind(nowIso(), user.id, id),
+    // 与 admin 代删路径（admin.ts）保持一致：软删也要扣减分类/作者计数，
+    // 否则作者自删后 post_count 永久虚高（实测复现）
+    c.env.DB.prepare(`UPDATE categories SET post_count = MAX(post_count - 1, 0) WHERE id = ?`).bind(post.category_id),
+    c.env.DB.prepare(`UPDATE users SET post_count = MAX(post_count - 1, 0) WHERE id = ?`).bind(post.author_id),
+  ]);
 
   // SEO：通知搜索引擎移除已删 URL（异步，不阻塞响应）
   try {
