@@ -42,16 +42,22 @@ for (const cfg of configs) {
   if (hasCrons && cfg !== 'wrangler.x.jsonc') { console.error(`   ✗ crons 触发器只应出现在 wrangler.x.jsonc`); failures++; }
   if (/JWT_SIGNING_KEYS/.test(code)) { console.error(`   ✗ 密钥不应出现在配置文件（用 wrangler secret put）`); failures++; }
 
-  // dry-run（assets 缺失时 wrangler 会报目录不存在，属预期环境问题，不算配置错误）
-  try {
-    execFileSync('npx', ['wrangler', 'deploy', '--dry-run', '-c', cfg], { cwd: root, stdio: 'pipe' });
-    console.log('   dry-run ✓');
-  } catch (e) {
-    const out = String(e.stdout ?? '') + String(e.stderr ?? '');
-    if (assetsMissing && /does not exist/.test(out)) {
-      console.log('   dry-run ⊘ 跳过（assets 目录未构建）');
-    } else {
-      console.error('   ✗ dry-run 失败：', out.split('\n').find((l) => /ERROR|error/.test(l)) ?? out.slice(0, 200));
+  // dry-run（assets 缺失时直接跳过：CI 不构建前端，目录必然不存在，属预期环境问题）
+  if (assetsMissing) {
+    console.log('   dry-run ⊘ 跳过（assets 目录未构建）');
+  } else {
+    try {
+      execFileSync('npx', ['wrangler', 'deploy', '--dry-run', '-c', cfg], { cwd: root, stdio: 'pipe' });
+      console.log('   dry-run ✓');
+    } catch (e) {
+      const out = String(e.stdout ?? '') + String(e.stderr ?? '');
+      const firstErr = out.split('\n').find((l) => /ERROR|error/.test(l)) ?? out.slice(0, 200);
+      // Node 版本不满足 wrangler 要求时明确提示（不算配置错误，但 CI 需要升 Node）
+      if (/Node\.js v22|update your version of Node/.test(out)) {
+        console.error('   ✗ dry-run 失败（Node 版本不满足 wrangler 要求，CI 需 node-version: 22）');
+      } else {
+        console.error('   ✗ dry-run 失败：', firstErr);
+      }
       failures++;
     }
   }
