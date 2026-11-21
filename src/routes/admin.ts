@@ -488,6 +488,7 @@ app.get('/posts', requireRole('moderator', 'admin'), async (c) => {
   const { results } = await c.env.DB.prepare(
     `SELECT p.id, p.title, p.is_deleted AS isDeleted, p.is_pinned AS isPinned, p.is_featured AS isFeatured,
             p.view_count AS viewCount, p.reply_count AS replyCount, p.created_at AS createdAt,
+            p.category_id AS categoryId,
             u.username_raw AS authorName, u.nickname AS authorNickname, c.name AS categoryName
      FROM posts p JOIN users u ON u.id = p.author_id JOIN categories c ON c.id = p.category_id
      ${whereSql} ORDER BY p.created_at DESC LIMIT ? OFFSET ?`,
@@ -525,6 +526,46 @@ app.post('/posts/:id/pin', requireRole('moderator', 'admin'), moderationAction('
 app.post('/posts/:id/unpin', requireRole('moderator', 'admin'), moderationAction('unpin'));
 app.post('/posts/:id/feature', requireRole('moderator', 'admin'), moderationAction('feature'));
 app.post('/posts/:id/unfeature', requireRole('moderator', 'admin'), moderationAction('unfeature'));
+
+const moveCategorySchema = z.object({ categoryId: z.string().min(1).max(32) });
+
+/** 管理员/版主移动帖子到其他分类（作者本人的分类编辑走 PATCH /api/posts/:id） */
+app.patch('/posts/:id/category', requireRole('moderator', 'admin'), async (c) => {
+  const admin = c.get('user')!;
+  const postId = c.req.param('id');
+  const body = await parseJson(c, moveCategorySchema);
+
+  const post = await c.env.DB.prepare(`SELECT id, is_deleted, category_id FROM posts WHERE id = ?`)
+    .bind(postId)
+    .first<{ id: string; is_deleted: number; category_id: string }>();
+  if (!post) throw errors.notFound('帖子不存在');
+  if (post.is_deleted) throw errors.badRequest('已删除的帖子不能移动分类，请先恢复');
+  if (post.category_id === body.categoryId) return ok(c, { success: true, moved: false });
+
+  // 目标分类必须存在；版主仅限移入自己辖区的版块
+  const target = await c.env.DB.prepare(`SELECT id, post_policy AS postPolicy FROM categories WHERE id = ? OR slug = ?`)
+    .bind(body.categoryId, body.categoryId)
+    .first<{ id: string; postPolicy: string }>();
+  if (!target) throw errors.badRequest('目标分类不存在', 'CATEGORY_NOT_FOUND');
+  await assertCategoryScope(c.env, admin, target.id);
+
+  // staff 版块发帖限制同样约束移入：普通作者的帖子不能移入仅限版主的版块
+  if (target.postPolicy === 'staff') throw errors.forbidden('目标分类仅限版主及以上发布，不能移入');
+
+  await c.env.DB.batch([
+    c.env.DB.prepare(`UPDATE posts SET category_id = ?, updated_at = ? WHERE id = ?`).bind(target.id, nowIso(), postId),
+    c.env.DB.prepare(`UPDATE categories SET post_count = MAX(post_count - 1, 0) WHERE id = ?`).bind(post.category_id),
+    c.env.DB.prepare(`UPDATE categories SET post_count = post_count + 1 WHERE id = ?`).bind(target.id),
+  ]);
+  await writeAuditLog(c, {
+    action: 'admin.post.move_category',
+    actorId: admin.id,
+    targetType: 'post',
+    targetId: postId,
+    detail: `${post.category_id} → ${target.id}`,
+  });
+  return ok(c, { success: true, moved: true, categoryId: target.id });
+});
 
 app.post('/posts/:id/restore', requireRole('moderator', 'admin'), async (c) => {
   const admin = c.get('user')!;
