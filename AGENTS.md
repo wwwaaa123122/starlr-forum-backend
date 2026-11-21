@@ -154,25 +154,24 @@ npx wrangler secret put RESEND_API_KEY      --name forum-backend          # 尚�
   `vm._setUnsafeEval is not a function`（2026-11-21 实测回滚）。
   要动就整条工具链（pool-workers + wrangler + compat date）一起升并全量回归。
 
-## 测试与 CI 扩充（2026-11-21 起）
+## 测试与 CI（2026-11-21 起）
 
-- CI 五门禁 = typecheck + vitest（235 用例）+ **`npm run check:configs`**（wrangler 配置一致性）。
-- 新增测试文件：seo-push / mail-accounts / admin-services / admin-sso / markdown。
+- CI 五门禁 = typecheck + vitest（**254 用例** / 30 文件）+ `npm run check:configs`（wrangler 配置一致性）。
+- 测试文件分布：security / auth / sessions / permissions / posts / s3 / s3-test /
+  seo-push / mail-accounts / admin-services / admin-sso / markdown / …
 - **fetchMock（undici MockAgent）已知限制**（写外部 API mock 前必读）：
-  - 没有按测试重置的 API：`deactivate/activate` **不清除**已 `persist()` 的拦截器，
-    多个 persist 拦截器按注册序全部命中 → 用例串扰。
+  - 无按测试重置 API：`deactivate/activate` **不清除**已 `persist()` 的拦截器。
+  - 拦截器**先注册先命中**：同路径多用例串扰 → 全局单拦截器 + 每用例可编程序列
+    （test/mail-accounts.test.ts 的 mockResendSeq），或唯一路径前缀隔离
+    （test/s3-test.test.ts 的 t1/t2-fail/t3-mismatch）。
+  - 函数式 `reply(() => ({statusCode, body}))` **丢响应体**（恒空），
+    返回内容必须用直接形式 `reply(status, body)`。
   - reply 回调**拿不到请求头**，无法按 Authorization 区分账号。
-- **函数式 `reply(() => ({statusCode, body}))` 会丢响应体**（body 恒为空），
-  要返回内容必须用直接形式 `reply(status, body)`。
-- 拦截器**先注册先命中**且无按用例重置：同路径多用例会串扰，
-  用唯一路径前缀隔离各用例（见 test/s3-test.test.ts 的 t1/t2-fail/t3-mismatch）。
-  - 正确姿势：全局单拦截器（beforeAll 一次 persist）+ 每用例重置的响应序列
-    （见 test/mail-accounts.test.ts 的 mockResendSeq）。
   - D1 不按用例重置：用例先清自身 post_id 等遗留数据。
 - **路由实现注意**：`app.request()`（测试）无 ExecutionContext，`c.executionCtx.waitUntil`
   会抛错——依赖它的逻辑（SEO 推送等）在测试里直接调 lib 函数。
-- **lib/seo-push 语义**：429 短路后日志 attempts = 真实尝试次数（曾固定写 MAX_ATTEMPTS，
-  已修）；轮询起点 = 秒级时间片 % 池大小（测试里用 vi.spyOn(Date.now) 固定时间片去竞态）。
+- **时间相关逻辑**：轮询起点 = 秒级时间片 % 池大小（seo-push / mail），测试用
+  `vi.spyOn(Date.now)` 固定时间片去竞态。
 - **markdown.ts 安全语义**（改前必读）：先整体 escapeHtml 再白名单替换；URL 白名单
-  http(s) 与站内相对路径；输入是转义后文本，safeUrl 先还原再校验只转义一次。
+  http(s) 与站内相对路径；safeUrl 先还原再校验只转义一次。
   test/markdown.test.ts 的 XSS 用例是对这条防线的固化，改实现必须保持全绿。
