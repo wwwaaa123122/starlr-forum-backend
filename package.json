@@ -12,7 +12,8 @@
     "setup": "node scripts/setup.mjs",
     "generate:keys": "node scripts/generate-jwt-keys.mjs",
     "db:migrate:local": "wrangler d1 migrations apply DB --local",
-    "db:migrate:remote": "wrangler d1 migrations apply DB --remote -c wrangler.prod.jsonc"
+    "db:migrate:remote": "wrangler d1 migrations apply DB --remote -c wrangler.prod.jsonc",
+    "check:configs": "node scripts/check-wrangler-configs.mjs"
   },
   "dependencies": {
     "hono": "^4.6.0",

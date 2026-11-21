@@ -28,3 +28,8 @@ jobs:
       # 关闭 Turnstile、邮件走内存 outbox —— 不需要任何仓库 Secret 即可运行。
       - name: 单元/集成测试
         run: npm test
+
+      # 部署配置一致性：绑定名红线（DB/CACHE/UPLOADS）、crons 归属、密钥不入配置文件、dry-run 可构建
+      # assets 目录不存在时（CI 不构建前端）自动跳过对应 dry-run
+      - name: Wrangler 配置一致性检查
+        run: node scripts/check-wrangler-configs.mjs
