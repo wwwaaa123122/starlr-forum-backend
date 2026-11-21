@@ -162,6 +162,10 @@ npx wrangler secret put RESEND_API_KEY      --name forum-backend          # 尚�
   - 没有按测试重置的 API：`deactivate/activate` **不清除**已 `persist()` 的拦截器，
     多个 persist 拦截器按注册序全部命中 → 用例串扰。
   - reply 回调**拿不到请求头**，无法按 Authorization 区分账号。
+- **函数式 `reply(() => ({statusCode, body}))` 会丢响应体**（body 恒为空），
+  要返回内容必须用直接形式 `reply(status, body)`。
+- 拦截器**先注册先命中**且无按用例重置：同路径多用例会串扰，
+  用唯一路径前缀隔离各用例（见 test/s3-test.test.ts 的 t1/t2-fail/t3-mismatch）。
   - 正确姿势：全局单拦截器（beforeAll 一次 persist）+ 每用例重置的响应序列
     （见 test/mail-accounts.test.ts 的 mockResendSeq）。
   - D1 不按用例重置：用例先清自身 post_id 等遗留数据。
