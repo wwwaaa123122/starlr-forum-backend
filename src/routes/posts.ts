@@ -91,27 +91,29 @@ app.get('/', async (c) => {
 
   const baseFrom = `FROM posts p JOIN users u ON u.id = p.author_id JOIN categories c ON c.id = p.category_id ${joins.join(' ')}`;
 
-  const countRow = await c.env.DB.prepare(`SELECT COUNT(*) AS total ${baseFrom} WHERE ${where.join(' AND ')}`)
-    .bind(...params)
-    .first<{ total: number }>();
+  // COUNT 与列表页并行（原先串行两次 D1 往返）；标签查询依赖列表行，保持后置
+  const [countRow, listRes] = await Promise.all([
+    c.env.DB.prepare(`SELECT COUNT(*) AS total ${baseFrom} WHERE ${where.join(' AND ')}`)
+      .bind(...params)
+      .first<{ total: number }>(),
+    c.env.DB.prepare(
+      `SELECT p.id, p.title, p.is_pinned AS isPinned, p.is_featured AS isFeatured, p.edited_at AS editedAt,
+              p.view_count AS viewCount, p.reply_count AS replyCount, p.like_count AS likeCount,
+              p.favorite_count AS favoriteCount, p.created_at AS createdAt, p.updated_at AS updatedAt,
+              p.last_reply_at AS lastReplyAt,
+              substr(p.content, 1, 200) AS excerpt,
+              u.id AS authorId, u.uid AS authorUid, u.username_raw AS authorName, u.nickname AS authorNickname, u.avatar_url AS authorAvatar, u.role AS authorRole,
+              c.id AS categoryId, c.name AS categoryName, c.slug AS categorySlug
+       ${baseFrom}
+       WHERE ${where.join(' AND ')}
+       ORDER BY ${orderBy}
+       LIMIT ? OFFSET ?`,
+    )
+      .bind(...params, q.pageSize, offset)
+      .all<{ id: string; [k: string]: unknown }>(),
+  ]);
 
-  const { results } = await c.env.DB.prepare(
-    `SELECT p.id, p.title, p.is_pinned AS isPinned, p.is_featured AS isFeatured, p.edited_at AS editedAt,
-            p.view_count AS viewCount, p.reply_count AS replyCount, p.like_count AS likeCount,
-            p.favorite_count AS favoriteCount, p.created_at AS createdAt, p.updated_at AS updatedAt,
-            p.last_reply_at AS lastReplyAt,
-            substr(p.content, 1, 200) AS excerpt,
-            u.id AS authorId, u.uid AS authorUid, u.username_raw AS authorName, u.nickname AS authorNickname, u.avatar_url AS authorAvatar, u.role AS authorRole,
-            c.id AS categoryId, c.name AS categoryName, c.slug AS categorySlug
-     ${baseFrom}
-     WHERE ${where.join(' AND ')}
-     ORDER BY ${orderBy}
-     LIMIT ? OFFSET ?`,
-  )
-    .bind(...params, q.pageSize, offset)
-    .all();
-
-  const rows = results ?? [];
+  const rows = listRes.results ?? [];
   const tagMap = await tagsForPosts(c.env, rows.map((r) => r.id as string));
   const posts = rows.map((r) => ({ ...r, tags: tagMap.get(r.id as string) ?? [] }));
 
@@ -534,35 +536,36 @@ app.get('/:id/replies', async (c) => {
   const deletedFilter = canViewDeleted ? '' : ' AND r.is_deleted = 0';
   const deletedFilterCount = canViewDeleted ? '' : ' AND is_deleted = 0';
 
-  const countRow = await c.env.DB.prepare(
-    `SELECT COUNT(*) AS total FROM replies WHERE post_id = ?${deletedFilterCount}`,
-  )
-    .bind(id)
-    .first<{ total: number }>();
-
   const currentUserId = viewer?.id ?? '';
   const likedExpr = currentUserId
     ? `EXISTS(SELECT 1 FROM likes l WHERE l.target_type = 'reply' AND l.target_id = r.id AND l.user_id = ?) AS liked`
     : '0 AS liked';
   const likedParam = currentUserId ? [currentUserId] : [];
-  const { results } = await c.env.DB.prepare(
-    `SELECT r.id, r.content, r.parent_id AS parentReplyId, r.reply_to_user_id AS replyToUserId,
-            r.is_deleted AS isDeleted,
-            r.like_count AS likeCount, r.created_at AS createdAt, r.updated_at AS updatedAt,
-            r.edited_at AS editedAt,
-            u.id AS authorId, u.uid AS authorUid, u.username_raw AS authorName, u.nickname AS authorNickname, u.avatar_url AS authorAvatar, u.role AS authorRole,
-            ru.username_raw AS replyToUserName,
-            ${likedExpr}
-     FROM replies r
-     JOIN users u ON u.id = r.author_id
-     LEFT JOIN users ru ON ru.id = r.reply_to_user_id
-     WHERE r.post_id = ?${deletedFilter}
-     ORDER BY r.created_at ASC LIMIT ? OFFSET ?`,
-  )
-    .bind(...likedParam, id, pageSize, offset)
-    .all();
+  // COUNT 与列表页并行（原先串行两次 D1 往返）
+  const [countRow, listRes] = await Promise.all([
+    c.env.DB.prepare(`SELECT COUNT(*) AS total FROM replies WHERE post_id = ?${deletedFilterCount}`)
+      .bind(id)
+      .first<{ total: number }>(),
+    c.env.DB.prepare(
+      `SELECT r.id, r.content, r.parent_id AS parentReplyId, r.reply_to_user_id AS replyToUserId,
+              r.is_deleted AS isDeleted,
+              r.like_count AS likeCount, r.created_at AS createdAt, r.updated_at AS updatedAt,
+              r.edited_at AS editedAt,
+              u.id AS authorId, u.uid AS authorUid, u.username_raw AS authorName, u.nickname AS authorNickname, u.avatar_url AS authorAvatar, u.role AS authorRole,
+              ru.username_raw AS replyToUserName,
+              ${likedExpr}
+       FROM replies r
+       JOIN users u ON u.id = r.author_id
+       LEFT JOIN users ru ON ru.id = r.reply_to_user_id
+       WHERE r.post_id = ?${deletedFilter}
+       ORDER BY r.created_at ASC LIMIT ? OFFSET ?`,
+    )
+      .bind(...likedParam, id, pageSize, offset)
+      .all<{ [k: string]: unknown }>(),
+  ]);
+  const results = listRes.results ?? [];
 
-  return ok(c, { replies: results ?? [], pagination: paginationMeta(page, pageSize, countRow?.total ?? 0) });
+  return ok(c, { replies: results, pagination: paginationMeta(page, pageSize, countRow?.total ?? 0) });
 });
 
 app.post('/:id/replies', requireAuth, requireVerified, async (c) => {

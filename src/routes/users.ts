@@ -80,29 +80,32 @@ app.get('/:username/likes', async (c) => {
   const { page, pageSize } = paginationSchema.parse(Object.fromEntries(new URL(c.req.url).searchParams));
   const offset = (page - 1) * pageSize;
 
-  const countRow = await c.env.DB.prepare(
-    `SELECT COUNT(*) AS total FROM likes l JOIN posts p ON p.id = l.target_id AND p.is_deleted = 0
-     WHERE l.user_id = ? AND l.target_type = 'post'`,
-  )
-    .bind(user.id as string)
-    .first<{ total: number }>();
-
-  const { results } = await c.env.DB.prepare(
-    `SELECT p.id, p.title, substr(p.content, 1, 200) AS excerpt, p.view_count AS viewCount,
-            p.reply_count AS replyCount, p.like_count AS likeCount, p.favorite_count AS favoriteCount,
-            p.is_pinned AS isPinned, p.is_featured AS isFeatured,
-            p.created_at AS createdAt, p.last_reply_at AS lastReplyAt, l.created_at AS likedAt,
-            u.username_raw AS authorName, u.nickname AS authorNickname, u.id AS authorId, u.uid AS authorUid, u.avatar_url AS authorAvatar,
-            c.name AS categoryName, c.slug AS categorySlug
-     FROM likes l
-     JOIN posts p ON p.id = l.target_id AND p.is_deleted = 0
-     JOIN users u ON u.id = p.author_id
-     JOIN categories c ON c.id = p.category_id
-     WHERE l.user_id = ? AND l.target_type = 'post'
-     ORDER BY l.created_at DESC LIMIT ? OFFSET ?`,
-  )
-    .bind(user.id as string, pageSize, offset)
-    .all();
+  // COUNT 与列表页并行（原先串行两次 D1 往返）
+  const [countRow, listRes] = await Promise.all([
+    c.env.DB.prepare(
+      `SELECT COUNT(*) AS total FROM likes l JOIN posts p ON p.id = l.target_id AND p.is_deleted = 0
+       WHERE l.user_id = ? AND l.target_type = 'post'`,
+    )
+      .bind(user.id as string)
+      .first<{ total: number }>(),
+    c.env.DB.prepare(
+      `SELECT p.id, p.title, substr(p.content, 1, 200) AS excerpt, p.view_count AS viewCount,
+              p.reply_count AS replyCount, p.like_count AS likeCount, p.favorite_count AS favoriteCount,
+              p.is_pinned AS isPinned, p.is_featured AS isFeatured,
+              p.created_at AS createdAt, p.last_reply_at AS lastReplyAt, l.created_at AS likedAt,
+              u.username_raw AS authorName, u.nickname AS authorNickname, u.id AS authorId, u.uid AS authorUid, u.avatar_url AS authorAvatar,
+              c.name AS categoryName, c.slug AS categorySlug
+       FROM likes l
+       JOIN posts p ON p.id = l.target_id AND p.is_deleted = 0
+       JOIN users u ON u.id = p.author_id
+       JOIN categories c ON c.id = p.category_id
+       WHERE l.user_id = ? AND l.target_type = 'post'
+       ORDER BY l.created_at DESC LIMIT ? OFFSET ?`,
+    )
+      .bind(user.id as string, pageSize, offset)
+      .all<{ [k: string]: unknown }>(),
+  ]);
+  const results = listRes.results ?? [];
 
   return ok(c, { posts: results ?? [], pagination: paginationMeta(page, pageSize, countRow?.total ?? 0) });
 });
@@ -114,29 +117,31 @@ app.get('/:username/posts', async (c) => {
   const { page, pageSize } = paginationSchema.parse(Object.fromEntries(new URL(c.req.url).searchParams));
   const offset = (page - 1) * pageSize;
 
-  const countRow = await c.env.DB.prepare(
-    `SELECT COUNT(*) AS total FROM posts WHERE author_id = ? AND is_deleted = 0`,
-  )
-    .bind(user.id as string)
-    .first<{ total: number }>();
-  const { results } = await c.env.DB.prepare(
-    `SELECT p.id, p.title, substr(p.content, 1, 160) AS excerpt,
-            p.reply_count AS replyCount, p.like_count AS likeCount, p.view_count AS viewCount,
-            p.favorite_count AS favoriteCount, p.created_at AS createdAt,
-            p.last_reply_at AS lastReplyAt,
-            p.is_pinned AS isPinned, p.is_featured AS isFeatured,
-            c.name AS categoryName, c.slug AS categorySlug,
-            u.id AS authorId, u.username_raw AS authorName, u.nickname AS authorNickname,
-            u.avatar_url AS authorAvatar, u.uid AS authorUid, u.role AS authorRole
-     FROM posts p
-     JOIN categories c ON c.id = p.category_id
-     JOIN users u ON u.id = p.author_id
-     WHERE p.author_id = ? AND p.is_deleted = 0
-     ORDER BY p.created_at DESC LIMIT ? OFFSET ?`,
-  )
-    .bind(user.id as string, pageSize, offset)
-    .all();
-  return ok(c, { posts: results ?? [], pagination: paginationMeta(page, pageSize, countRow?.total ?? 0) });
+  // COUNT 与列表页并行（原先串行两次 D1 往返）
+  const [countRow, listRes] = await Promise.all([
+    c.env.DB.prepare(`SELECT COUNT(*) AS total FROM posts WHERE author_id = ? AND is_deleted = 0`)
+      .bind(user.id as string)
+      .first<{ total: number }>(),
+    c.env.DB.prepare(
+      `SELECT p.id, p.title, substr(p.content, 1, 160) AS excerpt,
+              p.reply_count AS replyCount, p.like_count AS likeCount, p.view_count AS viewCount,
+              p.favorite_count AS favoriteCount, p.created_at AS createdAt,
+              p.last_reply_at AS lastReplyAt,
+              p.is_pinned AS isPinned, p.is_featured AS isFeatured,
+              c.name AS categoryName, c.slug AS categorySlug,
+              u.id AS authorId, u.username_raw AS authorName, u.nickname AS authorNickname,
+              u.avatar_url AS authorAvatar, u.uid AS authorUid, u.role AS authorRole
+       FROM posts p
+       JOIN categories c ON c.id = p.category_id
+       JOIN users u ON u.id = p.author_id
+       WHERE p.author_id = ? AND p.is_deleted = 0
+       ORDER BY p.created_at DESC LIMIT ? OFFSET ?`,
+    )
+      .bind(user.id as string, pageSize, offset)
+      .all<{ [k: string]: unknown }>(),
+  ]);
+  const results = listRes.results ?? [];
+  return ok(c, { posts: results, pagination: paginationMeta(page, pageSize, countRow?.total ?? 0) });
 });
 
 app.get('/:username/replies', async (c) => {
@@ -146,27 +151,29 @@ app.get('/:username/replies', async (c) => {
   const { page, pageSize } = paginationSchema.parse(Object.fromEntries(new URL(c.req.url).searchParams));
   const offset = (page - 1) * pageSize;
 
-  const countRow = await c.env.DB.prepare(
-    `SELECT COUNT(*) AS total FROM replies WHERE author_id = ? AND is_deleted = 0`,
-  )
-    .bind(user.id as string)
-    .first<{ total: number }>();
-  const { results } = await c.env.DB.prepare(
-    `SELECT r.id, r.content, r.created_at AS createdAt, r.post_id AS postId,
-            p.title AS postTitle, p.is_deleted AS postDeleted,
-            r.like_count AS likeCount, r.edited_at AS editedAt,
-            r.author_id AS authorId,
-            ru.username_raw AS replyToUserName,
-            u.username_raw AS authorName, u.nickname AS authorNickname,
-            u.avatar_url AS authorAvatar, u.uid AS authorUid, u.role AS authorRole
-     FROM replies r JOIN posts p ON p.id = r.post_id JOIN users u ON u.id = r.author_id
-     LEFT JOIN users ru ON ru.id = r.reply_to_user_id
-     WHERE r.author_id = ? AND r.is_deleted = 0 AND p.is_deleted = 0
-     ORDER BY r.created_at DESC LIMIT ? OFFSET ?`,
-  )
-    .bind(user.id as string, pageSize, offset)
-    .all();
-  return ok(c, { replies: results ?? [], pagination: paginationMeta(page, pageSize, countRow?.total ?? 0) });
+  // COUNT 与列表页并行（原先串行两次 D1 往返）
+  const [countRow, listRes] = await Promise.all([
+    c.env.DB.prepare(`SELECT COUNT(*) AS total FROM replies WHERE author_id = ? AND is_deleted = 0`)
+      .bind(user.id as string)
+      .first<{ total: number }>(),
+    c.env.DB.prepare(
+      `SELECT r.id, r.content, r.created_at AS createdAt, r.post_id AS postId,
+              p.title AS postTitle, p.is_deleted AS postDeleted,
+              r.like_count AS likeCount, r.edited_at AS editedAt,
+              r.author_id AS authorId,
+              ru.username_raw AS replyToUserName,
+              u.username_raw AS authorName, u.nickname AS authorNickname,
+              u.avatar_url AS authorAvatar, u.uid AS authorUid, u.role AS authorRole
+       FROM replies r JOIN posts p ON p.id = r.post_id JOIN users u ON u.id = r.author_id
+       LEFT JOIN users ru ON ru.id = r.reply_to_user_id
+       WHERE r.author_id = ? AND r.is_deleted = 0 AND p.is_deleted = 0
+       ORDER BY r.created_at DESC LIMIT ? OFFSET ?`,
+    )
+      .bind(user.id as string, pageSize, offset)
+      .all<{ [k: string]: unknown }>(),
+  ]);
+  const results = listRes.results ?? [];
+  return ok(c, { replies: results, pagination: paginationMeta(page, pageSize, countRow?.total ?? 0) });
 });
 
 export default app;

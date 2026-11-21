@@ -48,13 +48,12 @@ export async function tagsForPosts(
 export async function ensureTags(env: Env, names: string[]): Promise<Map<string, string>> {
   const map = new Map<string, string>();
   if (names.length === 0) return map;
-  for (const name of names) {
-    await env.DB.prepare(
-      `INSERT INTO tags (id, name) VALUES (?, ?) ON CONFLICT(name) DO NOTHING`,
-    )
-      .bind(newIdInternal(), name)
-      .run();
-  }
+  // 批量 upsert：单次往返（原先 for 循环逐条 run()，5 个标签 = 5 次串行 D1 往返）
+  await env.DB.batch(
+    names.map((name) =>
+      env.DB.prepare(`INSERT INTO tags (id, name) VALUES (?, ?) ON CONFLICT(name) DO NOTHING`).bind(newIdInternal(), name),
+    ),
+  );
   const placeholders = names.map(() => '?').join(',');
   const { results } = await env.DB.prepare(`SELECT id, name FROM tags WHERE name IN (${placeholders})`)
     .bind(...names)

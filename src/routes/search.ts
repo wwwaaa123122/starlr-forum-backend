@@ -69,30 +69,31 @@ async function searchPostsByLike(
     params.push(tag);
   }
   const baseFrom = `FROM posts p JOIN users u ON u.id = p.author_id JOIN categories c ON c.id = p.category_id`;
-  const countRow = await env.DB.prepare(
-    `SELECT COUNT(*) AS total ${baseFrom} WHERE ${conditions.join(' AND ')}`,
-  )
-    .bind(...params)
-    .first<{ total: number }>();
   const likeOrderBy =
     sort === 'new'
       ? 'p.created_at DESC'
       : sort === 'hot'
         ? `((p.like_count * 3 + p.reply_count * 2 + p.favorite_count * 2 + p.view_count / 10.0 + 1) / pow(MAX((julianday('now') - julianday(p.created_at)) * 24.0, 0.5), 1.2)) DESC, p.last_reply_at DESC`
         : 'p.last_reply_at DESC';
-  const { results } = await env.DB.prepare(
-    `SELECT p.id, p.title, substr(p.content, 1, 200) AS excerpt,
-            p.reply_count AS replyCount, p.like_count AS likeCount, p.view_count AS viewCount,
-            p.favorite_count AS favoriteCount, p.is_pinned AS isPinned, p.is_featured AS isFeatured,
-            p.created_at AS createdAt, p.last_reply_at AS lastReplyAt, p.updated_at AS updatedAt, p.category_id AS categoryId,
-            u.id AS authorId, u.username_raw AS authorName, u.nickname AS authorNickname, u.avatar_url AS authorAvatar, u.uid AS authorUid, u.role AS authorRole,
-            c.name AS categoryName, c.slug AS categorySlug
-     ${baseFrom} WHERE ${conditions.join(' AND ')}
-     ORDER BY ${likeOrderBy} LIMIT ? OFFSET ?`,
-  )
-    .bind(...params, pageSize, page - 1 >= 0 ? (page - 1) * pageSize : 0)
-    .all<PostSearchRow>();
-  return { posts: results ?? [], total: countRow?.total ?? 0 };
+  // COUNT 与列表页并行（原先串行两次 D1 往返）
+  const [countRow, listRes] = await Promise.all([
+    env.DB.prepare(`SELECT COUNT(*) AS total ${baseFrom} WHERE ${conditions.join(' AND ')}`)
+      .bind(...params)
+      .first<{ total: number }>(),
+    env.DB.prepare(
+      `SELECT p.id, p.title, substr(p.content, 1, 200) AS excerpt,
+              p.reply_count AS replyCount, p.like_count AS likeCount, p.view_count AS viewCount,
+              p.favorite_count AS favoriteCount, p.is_pinned AS isPinned, p.is_featured AS isFeatured,
+              p.created_at AS createdAt, p.last_reply_at AS lastReplyAt, p.updated_at AS updatedAt, p.category_id AS categoryId,
+              u.id AS authorId, u.username_raw AS authorName, u.nickname AS authorNickname, u.avatar_url AS authorAvatar, u.uid AS authorUid, u.role AS authorRole,
+              c.name AS categoryName, c.slug AS categorySlug
+       ${baseFrom} WHERE ${conditions.join(' AND ')}
+       ORDER BY ${likeOrderBy} LIMIT ? OFFSET ?`,
+    )
+      .bind(...params, pageSize, page - 1 >= 0 ? (page - 1) * pageSize : 0)
+      .all<PostSearchRow>(),
+  ]);
+  return { posts: listRes.results ?? [], total: countRow?.total ?? 0 };
 }
 
 app.get('/', async (c) => {

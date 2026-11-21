@@ -147,28 +147,31 @@ app.get('/favorites', async (c) => {
   const { page, pageSize } = paginationSchema.parse(Object.fromEntries(new URL(c.req.url).searchParams));
   const offset = (page - 1) * pageSize;
 
-  const countRow = await c.env.DB.prepare(`SELECT COUNT(*) AS total FROM favorites WHERE user_id = ?`)
-    .bind(user.id)
-    .first<{ total: number }>();
+  // COUNT 与列表页并行（原先串行两次 D1 往返）
+  const [countRow, listRes] = await Promise.all([
+    c.env.DB.prepare(`SELECT COUNT(*) AS total FROM favorites WHERE user_id = ?`)
+      .bind(user.id)
+      .first<{ total: number }>(),
+    c.env.DB.prepare(
+      `SELECT p.id, p.title, substr(p.content, 1, 200) AS excerpt, p.view_count AS viewCount,
+              p.reply_count AS replyCount, p.like_count AS likeCount, p.favorite_count AS favoriteCount,
+              p.is_pinned AS isPinned, p.is_featured AS isFeatured,
+              p.created_at AS createdAt, p.last_reply_at AS lastReplyAt, f.created_at AS favoritedAt,
+              u.username_raw AS authorName, u.nickname AS authorNickname, u.id AS authorId, u.uid AS authorUid, u.avatar_url AS authorAvatar,
+              c.name AS categoryName, c.slug AS categorySlug
+       FROM favorites f
+       JOIN posts p ON p.id = f.post_id AND p.is_deleted = 0
+       JOIN users u ON u.id = p.author_id
+       JOIN categories c ON c.id = p.category_id
+       WHERE f.user_id = ?
+       ORDER BY f.created_at DESC LIMIT ? OFFSET ?`,
+    )
+      .bind(user.id, pageSize, offset)
+      .all<{ [k: string]: unknown }>(),
+  ]);
+  const results = listRes.results ?? [];
 
-  const { results } = await c.env.DB.prepare(
-    `SELECT p.id, p.title, substr(p.content, 1, 200) AS excerpt, p.view_count AS viewCount,
-            p.reply_count AS replyCount, p.like_count AS likeCount, p.favorite_count AS favoriteCount,
-            p.is_pinned AS isPinned, p.is_featured AS isFeatured,
-            p.created_at AS createdAt, p.last_reply_at AS lastReplyAt, f.created_at AS favoritedAt,
-            u.username_raw AS authorName, u.nickname AS authorNickname, u.id AS authorId, u.uid AS authorUid, u.avatar_url AS authorAvatar,
-            c.name AS categoryName, c.slug AS categorySlug
-     FROM favorites f
-     JOIN posts p ON p.id = f.post_id AND p.is_deleted = 0
-     JOIN users u ON u.id = p.author_id
-     JOIN categories c ON c.id = p.category_id
-     WHERE f.user_id = ?
-     ORDER BY f.created_at DESC LIMIT ? OFFSET ?`,
-  )
-    .bind(user.id, pageSize, offset)
-    .all();
-
-  return ok(c, { posts: results ?? [], pagination: paginationMeta(page, pageSize, countRow?.total ?? 0) });
+  return ok(c, { posts: results, pagination: paginationMeta(page, pageSize, countRow?.total ?? 0) });
 });
 
 const changePasswordSchema = z.object({
@@ -212,31 +215,34 @@ app.get('/likes', async (c) => {
   const { page, pageSize } = paginationSchema.parse(Object.fromEntries(new URL(c.req.url).searchParams));
   const offset = (page - 1) * pageSize;
 
-  const countRow = await c.env.DB.prepare(
-    `SELECT COUNT(*) AS total FROM likes l JOIN posts p ON p.id = l.target_id AND p.is_deleted = 0
-     WHERE l.user_id = ? AND l.target_type = 'post'`,
-  )
-    .bind(user.id)
-    .first<{ total: number }>();
+  // COUNT 与列表页并行（原先串行两次 D1 往返）
+  const [countRow, listRes] = await Promise.all([
+    c.env.DB.prepare(
+      `SELECT COUNT(*) AS total FROM likes l JOIN posts p ON p.id = l.target_id AND p.is_deleted = 0
+       WHERE l.user_id = ? AND l.target_type = 'post'`,
+    )
+      .bind(user.id)
+      .first<{ total: number }>(),
+    c.env.DB.prepare(
+      `SELECT p.id, p.title, substr(p.content, 1, 200) AS excerpt, p.view_count AS viewCount,
+              p.reply_count AS replyCount, p.like_count AS likeCount, p.favorite_count AS favoriteCount,
+              p.is_pinned AS isPinned, p.is_featured AS isFeatured,
+              p.created_at AS createdAt, p.last_reply_at AS lastReplyAt, l.created_at AS likedAt,
+              u.username_raw AS authorName, u.nickname AS authorNickname, u.id AS authorId, u.uid AS authorUid, u.avatar_url AS authorAvatar,
+              c.name AS categoryName, c.slug AS categorySlug
+       FROM likes l
+       JOIN posts p ON p.id = l.target_id AND p.is_deleted = 0
+       JOIN users u ON u.id = p.author_id
+       JOIN categories c ON c.id = p.category_id
+       WHERE l.user_id = ? AND l.target_type = 'post'
+       ORDER BY l.created_at DESC LIMIT ? OFFSET ?`,
+    )
+      .bind(user.id, pageSize, offset)
+      .all<{ [k: string]: unknown }>(),
+  ]);
+  const results = listRes.results ?? [];
 
-  const { results } = await c.env.DB.prepare(
-    `SELECT p.id, p.title, substr(p.content, 1, 200) AS excerpt, p.view_count AS viewCount,
-            p.reply_count AS replyCount, p.like_count AS likeCount, p.favorite_count AS favoriteCount,
-            p.is_pinned AS isPinned, p.is_featured AS isFeatured,
-            p.created_at AS createdAt, p.last_reply_at AS lastReplyAt, l.created_at AS likedAt,
-            u.username_raw AS authorName, u.nickname AS authorNickname, u.id AS authorId, u.uid AS authorUid, u.avatar_url AS authorAvatar,
-            c.name AS categoryName, c.slug AS categorySlug
-     FROM likes l
-     JOIN posts p ON p.id = l.target_id AND p.is_deleted = 0
-     JOIN users u ON u.id = p.author_id
-     JOIN categories c ON c.id = p.category_id
-     WHERE l.user_id = ? AND l.target_type = 'post'
-     ORDER BY l.created_at DESC LIMIT ? OFFSET ?`,
-  )
-    .bind(user.id, pageSize, offset)
-    .all();
-
-  return ok(c, { posts: results ?? [], pagination: paginationMeta(page, pageSize, countRow?.total ?? 0) });
+  return ok(c, { posts: results, pagination: paginationMeta(page, pageSize, countRow?.total ?? 0) });
 });
 
 // ---------------------------------------------------------------------------
