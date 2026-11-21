@@ -140,6 +140,17 @@ npx wrangler secret put RESEND_API_KEY      --name forum-backend          # 尚�
 - 所有站点相关的硬编码域名都走环境变量：`SITE_URL` / `APP_AUTH_ORIGIN` / `CANONICAL_SITE_URL` / `ALLOWED_ORIGINS` / `OAUTH_REDIRECT_ORIGINS` / `SSO_ALLOWED_ORIGINS`。新增代码**不得**再写死域名。
 - 默认值集中在 `src/config/defaults.json`，不要在代码里新增魔法默认值。
 
+## 依赖审计状态（2026-11-21）
+
+- 生产依赖仅剩 zod <4.6.6（GHSA-mrhx-c7xc-m3w5）一条：v3 无修复版本，已在
+  `PUT /api/admin/services/:key` 前置 512KB 请求体防线（见 admin-services.ts），
+  实测 8M 键 OOM 已拦。彻底清掉需 zod v4 迁移（breaking，另行评估）。
+- dev 依赖链（sharp/miniflare/ws/undici/vitest）的 advisory **不要用
+  `npm install -D @cloudflare/vitest-pool-workers@0.9.x` 单点升级**：
+  新 miniflare 需要 workerd 同步升级，否则启动即
+  `vm._setUnsafeEval is not a function`（2026-11-21 实测回滚）。
+  要动就整条工具链（pool-workers + wrangler + compat date）一起升并全量回归。
+
 ## 测试与 CI 扩充（2026-11-21 起）
 
 - CI 五门禁 = typecheck + vitest（235 用例）+ **`npm run check:configs`**（wrangler 配置一致性）。
