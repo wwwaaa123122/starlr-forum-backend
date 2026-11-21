@@ -121,3 +121,25 @@ describe('GET/PATCH /api/admin/services/site（站点信息）', () => {
     expect((await req('/api/admin/services/site', { method: 'PATCH', token: user.accessToken, body: { site_name: 'x' } })).status).toBe(403);
   });
 });
+
+describe('GHSA-mrhx-c7xc-m3w5 防线（超大请求体）', () => {
+  it('超过 512KB 的请求体被 400 拒绝（不进入 zod 解析）', async () => {
+    // 构造 ~1MB 合法 JSON：海量小键值（真实攻击可达 8M 键导致 OOM，测试用 1MB 验证门）
+    const huge: Record<string, string> = {};
+    for (let i = 0; i < 24000; i++) huge[`field_${i}_with_padding_for_size`] = 'v'.repeat(10);
+    const body = JSON.stringify({ values: huge });
+    expect(body.length).toBeGreaterThan(512 * 1024);
+    const res = await req('/api/admin/services/seo', { method: 'PUT', token: adminToken, body, headers: { 'Content-Type': 'application/json' } });
+    expect(res.status).toBe(400);
+    expect(res.body.error?.code).toBe('PAYLOAD_TOO_LARGE');
+  });
+
+  it('正常大小的请求体不受影响（回归对照）', async () => {
+    const res = await req('/api/admin/services/seo', {
+      method: 'PUT',
+      token: adminToken,
+      body: { values: { canonical_host: 'guard.example.com' } },
+    });
+    expect(res.status).toBe(200);
+  });
+});
