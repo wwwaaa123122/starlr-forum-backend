@@ -5,7 +5,7 @@
  * - 指定账号（连通测试）：只走该账号不顺移、越界报错
  * 外部 Resend API 用 fetchMock 拦截。
  */
-import { describe, it, expect, beforeEach, beforeAll } from 'vitest';
+import { describe, it, expect, beforeEach, beforeAll, afterEach, vi } from 'vitest';
 import { fetchMock, env } from 'cloudflare:test';
 import { getMailAccounts, deliverViaResend, __clearMailOutbox } from '../src/lib/mail';
 
@@ -40,6 +40,10 @@ function mockResendSeq(statuses: number[]) {
   resendStatuses = statuses;
   resendSeqN = 0;
 }
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 beforeEach(async () => {
   fetchMock.activate();
@@ -98,6 +102,8 @@ describe('deliverViaResend 轮询投递', () => {
 
   it('当前账号失败自动顺移下一个，最终成功', async () => {
     await setKvAccounts([{ api_key: 'failing', from: 'a@x.com' }, { api_key: 'healthy', from: 'b@x.com' }]);
+    // 固定秒级时间片 → 轮询起点确定（索引 0）；序列第 1 次失败第 2 次成功
+    vi.spyOn(Date, 'now').mockReturnValue(3 * 1000 * 1_000_000); // 3,000,000 秒 % 3 = 0
     // 第 1 次调用失败（起点账号），第 2 次成功（顺移后）
     mockResendSeq([429, 200]);
     const r = await deliverViaResend(env, ['to@y.com'], 's', '<p/>', 't');
@@ -107,6 +113,8 @@ describe('deliverViaResend 轮询投递', () => {
 
   it('KV 账号失败顺移到 env 兜底账号后成功', async () => {
     await setKvAccounts([{ api_key: 'bad1', from: 'a@x.com' }]);
+    // 固定时间片 → 起点 = 索引 0（KV 账号 bad1）；失败后顺移到 env 兜底
+    vi.spyOn(Date, 'now').mockReturnValue(2 * 1000 * 1_000_000); // % 2 = 0
     // 第 1 次失败（KV 账号），第 2 次成功（env 兜底）
     mockResendSeq([500, 200]);
     const r = await deliverViaResend(env, ['to@y.com'], 's', '<p/>', 't');
