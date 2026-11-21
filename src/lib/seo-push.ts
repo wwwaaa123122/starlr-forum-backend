@@ -73,7 +73,9 @@ async function pushChannel(
   }
 
   let last: { ok: boolean; message: string; httpCode?: number } = { ok: false, message: '未执行' };
+  let attempts = 0;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    attempts = attempt;
     last = await fn();
     if (last.ok) {
       await logPush(env, { postId, url, channel, event, status: 'ok', httpCode: last.httpCode, attempts: attempt, message: last.message });
@@ -83,7 +85,7 @@ async function pushChannel(
     if (last.httpCode === 429) break;
     if (attempt < MAX_ATTEMPTS) await sleep(RETRY_DELAYS_MS[attempt - 1]);
   }
-  await logPush(env, { postId, url, channel, event, status: 'failed', httpCode: last.httpCode, attempts: MAX_ATTEMPTS, message: last.message });
+  await logPush(env, { postId, url, channel, event, status: 'failed', httpCode: last.httpCode, attempts, message: last.message });
   return false;
 }
 
