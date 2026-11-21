@@ -142,9 +142,12 @@ npx wrangler secret put RESEND_API_KEY      --name forum-backend          # 尚�
 
 ## 依赖审计状态（2026-11-21）
 
-- 生产依赖仅剩 zod <4.6.6（GHSA-mrhx-c7xc-m3w5）一条：v3 无修复版本，已在
-  `PUT /api/admin/services/:key` 前置 512KB 请求体防线（见 admin-services.ts），
-  实测 8M 键 OOM 已拦。彻底清掉需 zod v4 迁移（breaking，另行评估）。
+- 生产依赖仅剩 zod <4.6.6（GHSA-mrhx-c7xc-m3w5）一条：v3 无修复版本。
+  **全局防线在 `parseJson`（lib/validate.ts）**：JSON 体量 512KB 硬上限，
+  先 text() 再 parse，超限 PAYLOAD_TOO_LARGE——实测有界 array（.max(5)）在
+  16M 元素时也要先遍历完才报错（1.1GB 内存），schema 级约束防不住，
+  所以防线必须在 zod 之前且覆盖所有 JSON 接口。彻底清 advisory 需 zod v4 迁移。
+  上传接口（multipart）不走 parseJson，由自身 5MB 校验把关。
 - dev 依赖链（sharp/miniflare/ws/undici/vitest）的 advisory **不要用
   `npm install -D @cloudflare/vitest-pool-workers@0.9.x` 单点升级**：
   新 miniflare 需要 workerd 同步升级，否则启动即

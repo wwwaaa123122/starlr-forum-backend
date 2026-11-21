@@ -4,7 +4,7 @@
  */
 import { describe, it, expect, beforeAll } from 'vitest';
 import { env } from 'cloudflare:test';
-import { createUser, req } from './helpers';
+import { createPost, createUser, req } from './helpers';
 
 let adminToken = '';
 
@@ -141,5 +141,30 @@ describe('GHSA-mrhx-c7xc-m3w5 防线（超大请求体）', () => {
       body: { values: { canonical_host: 'guard.example.com' } },
     });
     expect(res.status).toBe(200);
+  });
+});
+
+describe('parseJson 全局体量防线（validate.ts，覆盖所有 JSON 接口）', () => {
+  it('任意 JSON 接口超 512KB 一律 PAYLOAD_TOO_LARGE（以发帖为例验证全局生效）', async () => {
+    const author = await createUser({ username: 'bodylimituser' });
+    const categories = await req<{ categories: { id: string; slug?: string }[] }>('/api/categories');
+    const categoryId = categories.body.categories.find((c) => c.slug === 'tech')?.id ?? categories.body.categories[0].id;
+    const res = await req('/api/posts', {
+      method: 'POST',
+      token: author.accessToken,
+      body: {
+        title: '体量测试',
+        content: 'x'.repeat(600 * 1024),
+        categoryId,
+      },
+    });
+    expect(res.status).toBe(400);
+    expect(res.body.error?.code).toBe('PAYLOAD_TOO_LARGE');
+  });
+
+  it('边界内请求正常通过（对照：贴近 schema 上限但远小于体量防线）', async () => {
+    const author = await createUser({ username: 'bodyokuser' });
+    const res = await createPost(author.accessToken, { title: '正常长文', content: 'y'.repeat(40_000) });
+    expect(res.status).toBe(201);
   });
 });

@@ -63,20 +63,8 @@ app.put('/:key', async (c) => {
   const def = serviceDef(key);
   if (!def) throw errors.notFound('未知服务');
 
-  // GHSA-mrhx-c7xc-m3w5 前置防线：zod v3 对超大 record/array 会先收集全部 issue 再报错
-  // （实测 8M 键 record OOM 崩溃，进程直接死）。schema 级约束在 v3 下防不住，
-  // 必须在 parse 之前用原始 JSON 体量拦截。服务字段个位数，512KB 远超合理输入。
-  const bodyText = await c.req.text();
-  if (bodyText.length > 512 * 1024) {
-    throw errors.badRequest('请求体过大', 'PAYLOAD_TOO_LARGE');
-  }
-  let rawBody: unknown;
-  try {
-    rawBody = JSON.parse(bodyText);
-  } catch {
-    throw errors.badRequest('请求体必须是合法 JSON');
-  }
-  const { values, accounts } = saveSchema.parse(rawBody);
+  // 体量防线已上移到 parseJson（validate.ts 全局 512KB 上限，GHSA-mrhx-c7xc-m3w5）
+  const { values, accounts } = await parseJson(c, saveSchema);
 
   // mail 服务：账号池全量保存
   if (key === 'mail') {
