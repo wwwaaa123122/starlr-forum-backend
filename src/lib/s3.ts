@@ -37,23 +37,25 @@ async function hmac(key: Uint8Array | ArrayBuffer, data: string): Promise<ArrayB
   return crypto.subtle.sign('HMAC', cryptoKey, new TextEncoder().encode(data));
 }
 
-async function sha256Hex(data: string): Promise<string> {
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(data));
+async function sha256Hex(data: ArrayBuffer | string): Promise<string> {
+  const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data;
+  const buf = await crypto.subtle.digest('SHA-256', bytes as ArrayBuffer);
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-async function sigV4(method: string, url: URL, cfg: S3Config, amzDate: string): Promise<string> {
+async function sigV4(method: string, url: URL, cfg: S3Config, amzDate: string, payloadHash: string): Promise<string> {
   const date = amzDate.slice(0, 8);
   const scope = `${date}/${cfg.region}/s3/aws4_request`;
-  const emptyPayload = await sha256Hex('');
   const headers: Record<string, string> = {
     host: url.host,
-    'x-amz-content-sha256': emptyPayload,
+    // 必须是**实际请求体**的 SHA-256（AWS S3/R2 会校验）；历史实现恒用空载荷哈希，
+    // 导致所有带 body 的 PUT（图片上传）在严格实现上 403 SignatureDoesNotMatch / XAmzContentSHA256Mismatch
+    'x-amz-content-sha256': payloadHash,
     'x-amz-date': amzDate,
   };
   const signedHeaders = Object.keys(headers).sort().join(';');
   const canonicalHeaders = Object.keys(headers).sort().map((k) => `${k}:${headers[k]}\n`).join('');
-  const canonicalRequest = [method, url.pathname, url.search.replace(/^\?/, ''), canonicalHeaders, signedHeaders, emptyPayload].join('\n');
+  const canonicalRequest = [method, url.pathname, url.search.replace(/^\?/, ''), canonicalHeaders, signedHeaders, payloadHash].join('\n');
   const stringToSign = ['AWS4-HMAC-SHA256', amzDate, scope, await sha256Hex(canonicalRequest)].join('\n');
 
   const kDate = await hmac(new TextEncoder().encode(`AWS4${cfg.secret_access_key}`), date);
@@ -80,10 +82,11 @@ export async function s3Request(env: Env, method: 'GET' | 'HEAD' | 'PUT' | 'DELE
   const url = s3ObjectUrl(cfg, key);
   if (query) url.search = query;
   const amzDate = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
-  const authorization = await sigV4(method, url, cfg, amzDate);
+  const payloadHash = await sha256Hex(body ?? '');
+  const authorization = await sigV4(method, url, cfg, amzDate, payloadHash);
   return fetch(url.toString(), {
     method,
-    headers: { Authorization: authorization, 'x-amz-date': amzDate, 'x-amz-content-sha256': await sha256Hex('') },
+    headers: { Authorization: authorization, 'x-amz-date': amzDate, 'x-amz-content-sha256': payloadHash },
     body: body as BodyInit | undefined,
   });
 }

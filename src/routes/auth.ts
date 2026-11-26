@@ -208,8 +208,10 @@ app.post('/login', async (c) => {
   const body = await parseJson(c, loginSchema);
   const identifier = body.identifier.toLowerCase();
 
-  // 针对单账号的分布式暴力破解防护
-  const accountRl = await consumeRateLimit(c.env, { bucket: `login:${identifier}`, limit: 10, window: 600 }, fingerprint);
+  // 针对单账号的分布式暴力破解防护。
+  // 键必须只按「账号」聚合（identifier）：历史实现把 IP 指纹当作第二段键，
+  // 结果该桶与上面的 IP 桶完全等价，攻击者换 IP 即可对同一账号无限尝试。
+  const accountRl = await consumeRateLimit(c.env, { bucket: 'login-acct', limit: 30, window: 600 }, identifier);
   if (!accountRl.ok) throw errors.tooMany('该账号尝试次数过多，请稍后再试');
 
   const turnstile = await verifyTurnstile(c.env, body.turnstileToken, c.req.header('cf-connecting-ip'));

@@ -89,6 +89,20 @@ describe('PATCH /api/admin/posts/:id/category', () => {
     expect((await move(postId, targetCatId, authorToken)).status).toBe(403);
   });
 
+  it('版主不能把别版帖子搬进自己辖区（源分类也要在辖区内）', async () => {
+    const mod = await createUser({ username: 'movecatmod' });
+    await env.DB.prepare(`UPDATE users SET role='moderator' WHERE id = ?`).bind(mod.id).run();
+    await env.DB.prepare(`INSERT INTO moderators (user_id, category_id) VALUES (?, ?)`).bind(mod.id, targetCatId).run();
+
+    const postId = (await createPost(authorToken, { title: '跨版越权验证帖', content: 'x', categoryId: sourceCatId })).body.id as string;
+    const res = await move(postId, targetCatId, mod.accessToken);
+    expect(res.status).toBe(403);
+
+    // 帖子仍在源分类
+    const post = await env.DB.prepare(`SELECT category_id FROM posts WHERE id = ?`).bind(postId).first<{ category_id: string }>();
+    expect(post?.category_id).toBe(sourceCatId);
+  });
+
   it('staff 版块不能移入（post_policy 限制对移动同样生效）', async () => {
     // 站务公告是 staff 版块
     const cats = await req<{ categories: { id: string; slug: string }[] }>('/api/categories');

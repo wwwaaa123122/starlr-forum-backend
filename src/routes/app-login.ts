@@ -29,6 +29,7 @@ import { verifyTurnstile } from '../lib/turnstile';
 import { sessionInfoFrom } from '../lib/session-info';
 import { writeAuditLog } from '../lib/audit';
 import { createEmailVerificationToken, sendVerificationEmail } from '../lib/mail';
+import { getSetupConfig } from '../lib/setup';
 import { getSsoAccessConfig, normalizeOrigin, TICKET_TTL } from './site-login';
 
 const app = new Hono<AppEnv>();
@@ -98,7 +99,8 @@ app.post('/prepare', async (c) => {
 
   if (body.mode === 'login') {
     const identifier = body.identifier!.toLowerCase();
-    const accountRl = await consumeRateLimit(c.env, { bucket: `login:${identifier}`, limit: 10, window: 600 }, fingerprint);
+    // 与 /login 一致：账号级桶只按账号聚合（不能混入 IP 指纹，否则换 IP 即可绕过）
+    const accountRl = await consumeRateLimit(c.env, { bucket: 'login-acct', limit: 30, window: 600 }, identifier);
     if (!accountRl.ok) throw errors.tooMany('该账号尝试次数过多，请稍后再试');
 
     const user = await c.env.DB.prepare(
@@ -126,6 +128,11 @@ app.post('/prepare', async (c) => {
   }
 
   // ---- 注册：只做校验与密码哈希，真正建号延迟到 confirm（Turnstile 通过后） ----
+  // 与 /api/auth/register 同一条业务开关：后台关闭注册后，App 端也不能绕过
+  const setup = await getSetupConfig(c.env);
+  if (!setup.registrationEnabled) {
+    throw errors.forbidden('本站已关闭注册', 'REGISTRATION_CLOSED');
+  }
   const strength = isStrongEnough(body.password);
   if (!strength.ok) throw errors.badRequest(strength.reason ?? '密码强度不足', 'WEAK_PASSWORD');
 
@@ -208,6 +215,11 @@ app.post('/confirm', async (c) => {
   }
 
   if (data.mode === 'register' && data.username && data.email && data.passwordHash) {
+    // preauth 有效期 5 分钟，期间管理员可能关闭注册：建号前复核一次
+    const setup = await getSetupConfig(c.env);
+    if (!setup.registrationEnabled) {
+      throw errors.forbidden('本站已关闭注册', 'REGISTRATION_CLOSED');
+    }
     // 并发注册触发唯一约束 → 统一提示
     const userId = newId(16);
     let uid: number;

@@ -52,6 +52,37 @@ describe('举报处理：delete_content', () => {
     expect(resolved.body.reports.some((r) => r.id === reportId)).toBe(true);
   });
 
+  it('删除被举报回复：回复软删 + 帖子/作者 reply_count 同步扣减', async () => {
+    const replier = await createUser({ username: 'rptreplier' });
+    const postId = (await createPost(authorToken, { title: '待删回复所在帖', content: 'x' })).body.id as string;
+    const replyId = (await req<{ id: string }>(`/api/posts/${postId}/replies`, {
+      method: 'POST',
+      token: replier.accessToken,
+      body: { content: '违规回复' },
+    })).body.id as string;
+
+    const report = await req<{ id: string }>('/api/reports', {
+      method: 'POST',
+      token: replier.accessToken,
+      body: { targetType: 'reply', targetId: replyId, reason: 'spam', detail: '' },
+    });
+    expect(report.status).toBe(201);
+
+    const res = await req(`/api/admin/reports/${report.body.id}/resolve`, {
+      method: 'POST',
+      token: adminToken,
+      body: { action: 'delete_content', note: '确认违规' },
+    });
+    expect(res.status).toBe(200);
+
+    const reply = await env.DB.prepare(`SELECT is_deleted FROM replies WHERE id = ?`).bind(replyId).first<{ is_deleted: number }>();
+    expect(reply?.is_deleted).toBe(1);
+    const post = await env.DB.prepare(`SELECT reply_count FROM posts WHERE id = ?`).bind(postId).first<{ reply_count: number }>();
+    expect(post?.reply_count).toBe(0);
+    const user = await env.DB.prepare(`SELECT reply_count FROM users WHERE id = ?`).bind(replier.id).first<{ reply_count: number }>();
+    expect(user?.reply_count).toBe(0);
+  });
+
   it('重复处理同一举报：400（已处理过）', async () => {
     const postId = (await createPost(authorToken, { title: '重复处理验证帖', content: 'x' })).body.id as string;
     const reportId = await reportPost(postId);

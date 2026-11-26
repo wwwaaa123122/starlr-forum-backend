@@ -97,6 +97,26 @@ describe('s3Request（SigV4）', () => {
     expect(flat).toMatch(/\d{8}T\d{6}Z/);
   });
 
+  it('PUT 带 body：x-amz-content-sha256 是请求体哈希（历史实现恒为空载荷哈希）', async () => {
+    await setKv(VALID_CFG as unknown as Record<string, string>);
+    let captured: unknown = null;
+    fetchMock
+      .get('https://s3.example.com')
+      .intercept({ method: 'PUT', path: '/my-bucket/uploads/a.png' })
+      .reply((options) => {
+        captured = options.headers;
+        return { statusCode: 200, body: '' };
+      });
+
+    await s3Request(env, 'PUT', 'uploads/a.png', '', 'ok');
+    const expected = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode('ok')))]
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+    const flat = JSON.stringify(captured);
+    expect(flat).toContain(expected);
+    expect(flat).not.toContain('e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
+  });
+
   it('同输入签名确定性：同一请求两次签名一致', async () => {
     await setKv(VALID_CFG as unknown as Record<string, string>);
     const sigs: string[] = [];

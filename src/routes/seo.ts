@@ -270,7 +270,7 @@ app.get('/categories', async (c) => {
   const { results: cats } = await c.env.DB
     .prepare(`SELECT cat.id, cat.slug, cat.name, cat.description,
               (SELECT COUNT(*) FROM posts p WHERE p.category_id = cat.id AND p.is_deleted = 0) AS post_count
-              FROM categories cat ORDER BY cat.position, cat.id`)
+              FROM categories cat ORDER BY cat.sort_order, cat.id`)
     .all<{ id: string; slug: string; name: string; description: string | null; post_count: number }>();
   return c.html(
     renderPage({
@@ -302,7 +302,14 @@ app.get('/c/:slug', async (c) => {
 });
 
 app.get('/u/:username', async (c) => {
-  const username = decodeURIComponent(c.req.param('username'));
+  // Hono 已对路径参数解码；这里再兜一层 try/catch，避免 % / %zz 这类输入抛 URIError → 500
+  const rawParam = c.req.param('username');
+  let username: string;
+  try {
+    username = decodeURIComponent(rawParam);
+  } catch {
+    username = rawParam;
+  }
   if (!isCrawler(c)) return spaFallback(c);
   const cfg = await getSeoConfig(c.env);
   const base = siteRoot(cfg);
@@ -333,18 +340,6 @@ app.get('/u/:username', async (c) => {
         .join('')}</ul>`,
     }),
   );
-});
-
-// ---------------------------------------------------------------- IndexNow key 验证文件
-// 配置了 indexnow_key 后，https://主域/<key>.txt 返回密钥本身（协议要求）
-app.get('/:keyfile', async (c) => {
-  const keyfile = c.req.param('keyfile');
-  if (!/^[a-f0-9-]{8,64}\.txt$/i.test(keyfile)) return spaFallback(c);
-  const cfg = await getSeoConfig(c.env);
-  if (!cfg.indexnow_key || keyfile.toLowerCase() !== `${cfg.indexnow_key.toLowerCase()}.txt`) {
-    return spaFallback(c);
-  }
-  return c.text(cfg.indexnow_key);
 });
 
 app.get('/explore', async (c) => {
@@ -380,6 +375,20 @@ app.get('/explore', async (c) => {
       bodyHtml: `<h1>${esc(cat ? cat.name : '热门探索')}</h1>${cat ? `<p>${esc(cat.description ?? '')}</p>` : ''}<ul>${posts.map((p) => `<li><a href="${base}/post/${p.id}">${esc(p.title)}</a> · 浏览 ${p.view_count} · 回复 ${p.reply_count}<p>${esc(plainText(p.content, 100))}</p></li>`).join('')}</ul>`,
     }),
   );
+});
+
+// ---------------------------------------------------------------- IndexNow key 验证文件
+// 配置了 indexnow_key 后，https://主域/<key>.txt 返回密钥本身（协议要求）。
+// 注意：通配 `/:keyfile` 必须放在所有单段页面路由（/explore 等）之后注册，
+// 否则会先命中它并走 spaFallback，把爬虫预渲染页面截胡（历史问题：/explore 对爬虫返回空 SPA 壳）。
+app.get('/:keyfile', async (c) => {
+  const keyfile = c.req.param('keyfile');
+  if (!/^[a-f0-9-]{8,64}\.txt$/i.test(keyfile)) return spaFallback(c);
+  const cfg = await getSeoConfig(c.env);
+  if (!cfg.indexnow_key || keyfile.toLowerCase() !== `${cfg.indexnow_key.toLowerCase()}.txt`) {
+    return spaFallback(c);
+  }
+  return c.text(cfg.indexnow_key);
 });
 
 /** 爬虫渲染兜底：由 index.ts 的 notFound 调用（显式页面路由未匹配时） */

@@ -2,7 +2,7 @@
 import { Hono } from 'hono';
 import type { AppEnv } from '../types';
 import { errors, ok } from '../lib/http';
-import { paginationSchema, paginationMeta } from '../lib/validate';
+import { parseQuery, paginationSchema, paginationMeta } from '../lib/validate';
 import { RATE_LIMITS, clientFingerprint, consumeRateLimit } from '../lib/rate-limit';
 
 const app = new Hono<AppEnv>();
@@ -77,7 +77,7 @@ app.get('/:username/likes', async (c) => {
   if (!isSelf && (user.likes_public ?? 0) !== 1) {
     throw errors.forbidden('该用户的喜欢不公开', 'LIKES_PRIVATE');
   }
-  const { page, pageSize } = paginationSchema.parse(Object.fromEntries(new URL(c.req.url).searchParams));
+  const { page, pageSize } = parseQuery(c, paginationSchema);
   const offset = (page - 1) * pageSize;
 
   // COUNT 与列表页并行（原先串行两次 D1 往返）
@@ -114,7 +114,7 @@ app.get('/:username/posts', async (c) => {
   const username = c.req.param('username');
   const user = await findUser(c, username);
   if (!user) throw errors.notFound('用户不存在');
-  const { page, pageSize } = paginationSchema.parse(Object.fromEntries(new URL(c.req.url).searchParams));
+  const { page, pageSize } = parseQuery(c, paginationSchema);
   const offset = (page - 1) * pageSize;
 
   // COUNT 与列表页并行（原先串行两次 D1 往返）
@@ -148,7 +148,7 @@ app.get('/:username/replies', async (c) => {
   const username = c.req.param('username');
   const user = await findUser(c, username);
   if (!user) throw errors.notFound('用户不存在');
-  const { page, pageSize } = paginationSchema.parse(Object.fromEntries(new URL(c.req.url).searchParams));
+  const { page, pageSize } = parseQuery(c, paginationSchema);
   const offset = (page - 1) * pageSize;
 
   // COUNT 与列表页并行（原先串行两次 D1 往返）

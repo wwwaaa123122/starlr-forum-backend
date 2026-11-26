@@ -540,6 +540,9 @@ app.patch('/posts/:id/category', requireRole('moderator', 'admin'), async (c) =>
     .first<{ id: string; is_deleted: number; category_id: string }>();
   if (!post) throw errors.notFound('帖子不存在');
   if (post.is_deleted) throw errors.badRequest('已删除的帖子不能移动分类，请先恢复');
+  // 源分类与目标分类都必须落在操作者辖区内：
+  // 只校验目标会让「A 版版主」把别版帖子搬进自己辖区（跨版越权 + 源版计数被改）。
+  await assertCategoryScope(c.env, admin, post.category_id);
   if (post.category_id === body.categoryId) return ok(c, { success: true, moved: false });
 
   // 目标分类必须存在；版主仅限移入自己辖区的版块
@@ -570,21 +573,21 @@ app.patch('/posts/:id/category', requireRole('moderator', 'admin'), async (c) =>
 app.post('/posts/:id/restore', requireRole('moderator', 'admin'), async (c) => {
   const admin = c.get('user')!;
   const postId = c.req.param('id');
-  const post = await c.env.DB.prepare(`SELECT id, is_deleted, deleted_by, category_id FROM posts WHERE id = ?`)
+  const post = await c.env.DB.prepare(`SELECT id, is_deleted, deleted_by, category_id, author_id FROM posts WHERE id = ?`)
     .bind(postId)
-    .first<{ id: string; is_deleted: number; deleted_by: string | null; category_id: string }>();
+    .first<{ id: string; is_deleted: number; deleted_by: string | null; category_id: string; author_id: string }>();
   if (!post) throw errors.notFound('帖子不存在');
   if (!post.is_deleted) throw errors.badRequest('帖子未处于删除状态');
   await assertCategoryScope(c.env, admin, post.category_id);
 
-  await c.env.DB.prepare(
-    `UPDATE posts SET is_deleted = 0, deleted_at = NULL, deleted_by = NULL, updated_at = ? WHERE id = ?`,
-  )
-    .bind(nowIso(), postId)
-    .run();
-  await c.env.DB.prepare(`UPDATE categories SET post_count = post_count + 1 WHERE id = ?`)
-    .bind(post.category_id)
-    .run();
+  await c.env.DB.batch([
+    c.env.DB.prepare(
+      `UPDATE posts SET is_deleted = 0, deleted_at = NULL, deleted_by = NULL, updated_at = ? WHERE id = ?`,
+    ).bind(nowIso(), postId),
+    // 恢复要对称还原删除时扣掉的分类/作者计数（历史实现漏了 users.post_count → 作者计数永久偏低）
+    c.env.DB.prepare(`UPDATE categories SET post_count = post_count + 1 WHERE id = ?`).bind(post.category_id),
+    c.env.DB.prepare(`UPDATE users SET post_count = post_count + 1 WHERE id = ?`).bind(post.author_id),
+  ]);
   await invalidateCategoryCache(c);
   await writeAuditLog(c, { action: 'admin.post.restore', actorId: admin.id, targetType: 'post', targetId: postId });
   return ok(c, { success: true });
@@ -1046,9 +1049,20 @@ app.post('/reports/:id/resolve', requireRole('moderator', 'admin'), async (c) =>
         await invalidateCategoryCache(c);
       }
     } else if (target?.targetType === 'reply') {
-      await c.env.DB.prepare(`UPDATE replies SET is_deleted = 1, deleted_at = ?, deleted_by = ? WHERE id = ?`)
-        .bind(nowIso(), admin.id, target.targetId)
-        .run();
+      const r = await c.env.DB.prepare(
+        `SELECT author_id, post_id FROM replies WHERE id = ? AND is_deleted = 0`,
+      )
+        .bind(target.targetId)
+        .first<{ author_id: string; post_id: string }>();
+      if (r) {
+        await c.env.DB.batch([
+          c.env.DB.prepare(`UPDATE replies SET is_deleted = 1, deleted_at = ?, deleted_by = ? WHERE id = ?`)
+            .bind(nowIso(), admin.id, target.targetId),
+          // 与 DELETE /api/admin/replies/:id 保持一致：删回复必须同步扣减帖子/作者回复计数
+          c.env.DB.prepare(`UPDATE posts SET reply_count = MAX(0, reply_count - 1) WHERE id = ?`).bind(r.post_id),
+          c.env.DB.prepare(`UPDATE users SET reply_count = MAX(0, reply_count - 1) WHERE id = ?`).bind(r.author_id),
+        ]);
+      }
     } else if (target?.targetType === 'user') {
       throw errors.badRequest('用户类型举报请使用禁言或封禁');
     }

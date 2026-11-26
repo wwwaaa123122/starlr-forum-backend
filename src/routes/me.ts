@@ -5,7 +5,7 @@ import { z } from 'zod';
 import type { AppEnv } from '../types';
 import { requireAuth } from '../middleware/auth';
 import { errors, ok } from '../lib/http';
-import { parseJson, paginationSchema, paginationMeta } from '../lib/validate';
+import { parseJson, parseQuery, paginationSchema, paginationMeta } from '../lib/validate';
 import { nowIso, sha256Hex } from '../lib/ids';
 import { hashPassword, isStrongEnough, verifyPassword } from '../lib/password';
 import { revokeAllUserTokens, revokeTokenChain } from '../lib/tokens';
@@ -13,12 +13,19 @@ import { writeAuditLog } from '../lib/audit';
 
 const app = new Hono<AppEnv>();
 
-/** 站内资源（/api/files/... 等）或绝对 URL 均可 */
+/** 站内资源（/api/files/... 等）或绝对 URL 均可。
+ *  拒绝 `//host/x` 这种协议相对地址（会被浏览器当外链加载，可做追踪像素/混合内容），
+ *  也拒绝反斜杠与控制字符（部分浏览器把 `\` 归一化成 `/`，可绕过前缀判断）。 */
 const imageUrlSchema = z
   .string()
   .trim()
   .max(500)
-  .refine((v) => v.startsWith('/') || /^https?:\/\//.test(v), '图片地址格式不正确');
+  .refine(
+    (v) =>
+      !/[\\\u0000-\u001f]/.test(v) &&
+      ((v.startsWith('/') && !v.startsWith('//')) || /^https?:\/\//i.test(v)),
+    '图片地址格式不正确',
+  );
 
 app.use('*', requireAuth);
 
@@ -144,7 +151,7 @@ app.patch('/', async (c) => {
 /** 我收藏的帖子 */
 app.get('/favorites', async (c) => {
   const user = c.get('user')!;
-  const { page, pageSize } = paginationSchema.parse(Object.fromEntries(new URL(c.req.url).searchParams));
+  const { page, pageSize } = parseQuery(c, paginationSchema);
   const offset = (page - 1) * pageSize;
 
   // COUNT 与列表页并行（原先串行两次 D1 往返）
@@ -212,7 +219,7 @@ export default app;
 /** 我点赞过的帖子（按点赞时间倒序） */
 app.get('/likes', async (c) => {
   const user = c.get('user')!;
-  const { page, pageSize } = paginationSchema.parse(Object.fromEntries(new URL(c.req.url).searchParams));
+  const { page, pageSize } = parseQuery(c, paginationSchema);
   const offset = (page - 1) * pageSize;
 
   // COUNT 与列表页并行（原先串行两次 D1 往返）

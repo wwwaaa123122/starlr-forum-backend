@@ -508,7 +508,7 @@ app.delete('/:id/favorite', requireAuth, async (c) => {
 // ---------------------------------------------------------------
 app.get('/:id/replies', async (c) => {
   const id = c.req.param('id');
-  const { page, pageSize } = paginationSchema.parse(Object.fromEntries(new URL(c.req.url).searchParams));
+  const { page, pageSize } = parseQuery(c, paginationSchema);
   const offset = (page - 1) * pageSize;
 
   const viewer = c.get('user');

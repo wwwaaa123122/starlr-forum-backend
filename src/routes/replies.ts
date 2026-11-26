@@ -7,7 +7,6 @@ import { parseJson } from '../lib/validate';
 import { assertNotMuted, requireAuth } from '../middleware/auth';
 import { assertCategoryScope } from '../lib/moderation';
 import { newId, nowIso } from '../lib/ids';
-import { bumpPostCounter, bumpUserCounter } from '../lib/queries';
 import { createNotification } from '../lib/notify';
 import { RATE_LIMITS, consumeRateLimit } from '../lib/rate-limit';
 
@@ -88,7 +87,8 @@ app.post('/:id/like', requireAuth, async (c) => {
 
   if ((res.meta?.changes ?? 0) > 0) {
     await c.env.DB.prepare(`UPDATE replies SET like_count = like_count + 1 WHERE id = ?`).bind(id).run();
-    await bumpPostCounter(c.env, reply.post_id, 'like_count', 1);
+    // 注意：回复点赞只应影响 replies.like_count。历史实现顺带 bump 了 posts.like_count，
+    // 导致「帖子的赞数」被回复点赞污染（帖子详情/列表显示的赞数虚高且取消后无法对齐）。
     await createNotification(c.env, {
       userId: reply.author_id,
       actorId: user.id,
@@ -118,7 +118,6 @@ app.delete('/:id/like', requireAuth, async (c) => {
     .run();
   if ((res.meta?.changes ?? 0) > 0) {
     await c.env.DB.prepare(`UPDATE replies SET like_count = MAX(0, like_count - 1) WHERE id = ?`).bind(id).run();
-    await bumpPostCounter(c.env, reply.post_id, 'like_count', -1);
   }
   const likeCount = await c.env.DB.prepare(`SELECT like_count FROM replies WHERE id = ?`).bind(id)
     .first<{ like_count: number }>();

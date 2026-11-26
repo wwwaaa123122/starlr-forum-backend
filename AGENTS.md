@@ -54,7 +54,8 @@ wrangler*.jsonc     # 部署矩阵（见上）
 
 **认证/会话**
 - JWT RS256，`kid` 头 + `/.well-known/jwks.json`；`JWT_ISSUER` 按 Worker 不同（x=https://x.182030.xyz，backend=https://i.182030.xyz）。
-- Access 30min / Refresh 30d 轮换（`lib/tokens.ts` 设备链：root_id + 重放检测整链撤销）。设备信息 JSON（UA/IP/位置/colo）由 `lib/session-info.ts` 从 `request.cf` 提取，存 `refresh_tokens.device_info`。
+- Access 30min / Refresh 30d 轮换（`lib/tokens.ts` 设备链：root_id + 重放检测整链撤销）。
+- 登录限流两桶叠加：IP 桶 10 次/10min + **账号桶 `login-acct` 30 次/10min（只按账号聚合，不要混入 IP 指纹**，否则换 IP 即可绕过分布式爆破防护）。设备信息 JSON（UA/IP/位置/colo）由 `lib/session-info.ts` 从 `request.cf` 提取，存 `refresh_tokens.device_info`。
 - 密码 PBKDF2-SHA256，迭代 `PASSWORD_ITERATIONS=100000`。
 - 生产注册/登录需 Turnstile token（`lib/turnstile.ts`）；`TURNSTILE_SECRET_KEY` 为 secret，写后不可读。
 
@@ -63,6 +64,7 @@ wrangler*.jsonc     # 部署矩阵（见上）
 - `PATCH /api/me` 必须返回 `{ success, user }` 且 user 为**全新查询行**——前端靠它直接 `setUser`。
 
 **图片/上传**
+- S3 兼容存储的 SigV4 `x-amz-content-sha256` 必须是**实际请求体**哈希（`lib/s3.ts`）；空载荷哈希会让带 body 的 PUT 在 AWS/R2 上 403。
 - 接口返回的图片地址一律**相对路径**（`/api/files/<r2key>`、`/api/avatars/<uid>?v=`）；跨域前端用 `assetUrl()` 拼前缀。上传用途 purpose：`post|reply|avatar|category|background`。
 
 **权限**
@@ -156,7 +158,7 @@ npx wrangler secret put RESEND_API_KEY      --name forum-backend          # 尚�
 
 ## 测试与 CI（2026-11-21 起）
 
-- CI 五门禁 = typecheck + vitest（**254 用例** / 30 文件）+ `npm run check:configs`（wrangler 配置一致性）。
+- CI 五门禁 = typecheck + vitest（**365 用例** / 49 文件）+ `npm run check:configs`（wrangler 配置一致性）。
 - 测试文件分布：security / auth / sessions / permissions / posts / s3 / s3-test /
   seo-push / mail-accounts / admin-services / admin-sso / markdown / …
 - **fetchMock（undici MockAgent）已知限制**（写外部 API mock 前必读）：

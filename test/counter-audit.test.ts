@@ -88,4 +88,41 @@ describe('计数一致性：reply 路径', () => {
     row = await env.DB.prepare(`SELECT favorite_count FROM posts WHERE id = ?`).bind(postId).first<{ favorite_count: number }>();
     expect(row?.favorite_count).toBe(0);
   });
+
+  it('回复点赞只影响 replies.like_count，不污染 posts.like_count', async () => {
+    const author = await createUser({ username: 'cntrlauthor' });
+    const replier = await createUser({ username: 'cntrlreplier' });
+    const liker = await createUser({ username: 'cntrlliker' });
+    const postId = (await createPost(author.accessToken, { title: '回复点赞计数帖', content: 'x' })).body.id as string;
+    const replyId = (await req<{ id: string }>(`/api/posts/${postId}/replies`, {
+      method: 'POST',
+      token: replier.accessToken,
+      body: { content: 'x' },
+    })).body.id as string;
+
+    const like = await req<{ likeCount: number }>(`/api/replies/${replyId}/like`, { method: 'POST', token: liker.accessToken });
+    expect(like.body.likeCount).toBe(1);
+
+    const post = await env.DB.prepare(`SELECT like_count FROM posts WHERE id = ?`).bind(postId).first<{ like_count: number }>();
+    expect(post?.like_count).toBe(0); // 帖子赞数不受回复点赞影响
+
+    const unlike = await req<{ likeCount: number }>(`/api/replies/${replyId}/like`, { method: 'DELETE', token: liker.accessToken });
+    expect(unlike.body.likeCount).toBe(0);
+  });
+
+  it('admin 删除再恢复帖子：categories / users 的 post_count 对称还原', async () => {
+    const author = await createUser({ username: 'cntpostrestore' });
+    const postId = (await createPost(author.accessToken, { title: '帖子恢复计数验证', content: 'x' })).body.id as string;
+    const cat = await env.DB.prepare(`SELECT category_id FROM posts WHERE id = ?`).bind(postId).first<{ category_id: string }>();
+    const beforeUser = await env.DB.prepare(`SELECT post_count FROM users WHERE id = ?`).bind(author.id).first<{ post_count: number }>();
+    const beforeCat = await env.DB.prepare(`SELECT post_count FROM categories WHERE id = ?`).bind(cat!.category_id).first<{ post_count: number }>();
+
+    expect((await req(`/api/admin/posts/${postId}`, { method: 'DELETE', token: adminToken })).status).toBe(200);
+    expect((await req(`/api/admin/posts/${postId}/restore`, { method: 'POST', token: adminToken })).status).toBe(200);
+
+    const afterUser = await env.DB.prepare(`SELECT post_count FROM users WHERE id = ?`).bind(author.id).first<{ post_count: number }>();
+    const afterCat = await env.DB.prepare(`SELECT post_count FROM categories WHERE id = ?`).bind(cat!.category_id).first<{ post_count: number }>();
+    expect(afterUser?.post_count).toBe(beforeUser?.post_count);
+    expect(afterCat?.post_count).toBe(beforeCat?.post_count);
+  });
 });

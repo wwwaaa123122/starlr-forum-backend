@@ -19,8 +19,11 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
+import { z } from 'zod';
 import type { AppEnv } from '../types';
 import { errors, ok } from '../lib/http';
+import { parseJson } from '../lib/validate';
+import { escapeHtml } from '../lib/markdown';
 import { issueTokens } from '../lib/tokens';
 import { newId, randomToken, nowIso } from '../lib/ids';
 import { sessionInfoFrom } from '../lib/session-info';
@@ -82,17 +85,29 @@ interface GithubUser {
 
 const app = new Hono<AppEnv>();
 
-/** 浏览器可见的极简结果页（回调发生在浏览器，不能返回 JSON） */
+/**
+ * 浏览器可见的极简结果页（回调发生在浏览器，不能返回 JSON）。
+ * 所有动态片段一律 HTML 转义：本页与 SPA 同源，任何注入都能读到 localStorage 里的 Token。
+ * （历史问题：`:provider` 路径参数与 GitHub 返回的 error_description 直接拼进 HTML → 反射型 XSS）
+ */
 function page(c: Context<AppEnv>, title: string, message: string, status = 200) {
+  const safeTitle = escapeHtml(title);
+  const safeMessage = escapeHtml(message);
   const html = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${title}</title>
+<title>${safeTitle}</title>
 <body style="font-family:system-ui,-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;background:#0b0e14;color:#e7e9ee;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0">
 <div style="text-align:center;padding:32px">
 <div style="font-size:40px;margin-bottom:12px">${status < 400 ? '✅' : '⚠️'}</div>
-<h1 style="font-size:20px;margin:0 0 8px">${title}</h1>
-<p style="opacity:.72;margin:0;font-size:14px;max-width:420px;line-height:1.6">${message}</p>
+<h1 style="font-size:20px;margin:0 0 8px">${safeTitle}</h1>
+<p style="opacity:.72;margin:0;font-size:14px;max-width:420px;line-height:1.6">${safeMessage}</p>
 </div></body>`;
-  return c.body(html, status as ContentfulStatusCode, { 'Content-Type': 'text/html; charset=utf-8' });
+  return c.body(html, status as ContentfulStatusCode, {
+    'Content-Type': 'text/html; charset=utf-8',
+    // 纵深防御：本页只需要内联样式，禁止一切脚本/外链资源/表单提交
+    'Content-Security-Policy':
+      "default-src 'none'; style-src 'unsafe-inline'; img-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    'X-Robots-Tag': 'noindex',
+  });
 }
 
 export async function getConfig(env: AppEnv['Bindings'], provider: string): Promise<GithubConfig | null> {
@@ -118,10 +133,18 @@ function safeRedirect(origin: string | undefined, env: AppEnv['Bindings']): stri
 }
 
 const KNOWN_PROVIDERS = new Set(['github']); // 后续接入在此扩展（配置键：config:oauth:<provider>）
+/** provider 路径参数格式约束：只允许小写字母开头的小写字母/数字/短横线 */
+const PROVIDER_RE = /^[a-z][a-z0-9-]{0,31}$/;
+
+/** 未知 provider 的提示页：格式不合法的路径片段不回显，避免任意输入进入 HTML */
+function unknownProvider(c: Context<AppEnv>, provider: string) {
+  const label = PROVIDER_RE.test(provider) ? ` ${provider} ` : '';
+  return page(c, '暂不支持', `登录方式${label}尚未开通。`, 404);
+}
 
 app.get('/start/:provider', async (c) => {
   const provider = c.req.param('provider');
-  if (!KNOWN_PROVIDERS.has(provider)) return page(c, '暂不支持', `登录方式 ${provider} 尚未开通。`, 404);
+  if (!KNOWN_PROVIDERS.has(provider)) return unknownProvider(c, provider);
   const cfg = await getConfig(c.env, provider);
   if (!cfg) return page(c, `${provider} 登录未配置`, `管理员尚未完成 ${provider} OAuth 配置（KV: config:oauth:${provider}）。`, 503);
 
@@ -148,7 +171,7 @@ app.get('/start/:provider', async (c) => {
 
 app.get('/callback/:provider', async (c) => {
   const provider = c.req.param('provider');
-  if (!KNOWN_PROVIDERS.has(provider)) return page(c, '暂不支持', `登录方式 ${provider} 尚未开通。`, 404);
+  if (!KNOWN_PROVIDERS.has(provider)) return unknownProvider(c, provider);
   const cfg = await getConfig(c.env, provider);
   if (!cfg) return page(c, `${provider} 登录未配置`, `管理员尚未完成 ${provider} OAuth 配置。`, 503);
 
@@ -161,7 +184,17 @@ app.get('/callback/:provider', async (c) => {
   const stateRaw = state ? await c.env.CACHE.get(`oauth:gh:state:${state}`) : null;
   if (stateRaw) await c.env.CACHE.delete(`oauth:gh:state:${state}`);
   if (!stateRaw) return page(c, '登录状态已失效', '授权会话已过期或不存在，请回到登录页重新点击「使用 GitHub 登录」。', 400);
-  const { redirect, bindUid } = JSON.parse(stateRaw) as { redirect: string; bindUid?: string | null };
+  let stateData: { redirect: string; bindUid?: string | null };
+  try {
+    stateData = JSON.parse(stateRaw) as { redirect: string; bindUid?: string | null };
+  } catch {
+    // KV 中的 state 损坏（人工写入/序列化异常）：按失效处理，不抛 500
+    return page(c, '登录状态已失效', '授权会话数据异常，请回到登录页重新操作。', 400);
+  }
+  if (typeof stateData.redirect !== 'string' || !stateData.redirect) {
+    return page(c, '登录状态已失效', '授权会话数据异常，请回到登录页重新操作。', 400);
+  }
+  const { redirect, bindUid } = stateData;
 
   const ghCode = c.req.query('code') ?? '';
   if (!ghCode) return page(c, '授权失败', 'GitHub 未返回授权码，请重试。', 400);
@@ -344,7 +377,8 @@ app.post('/exchange', async (c) => {
   const rl = await consumeRateLimit(c.env, RATE_LIMITS.login, fingerprint);
   if (!rl.ok) throw errors.tooMany('操作过于频繁，请稍后再试');
 
-  const body = (await c.req.json().catch(() => ({}))) as { code?: string };
+  // 走 parseJson：享受全局 512KB 请求体上限（裸 c.req.json() 没有这道防线）
+  const body = await parseJson(c, z.object({ code: z.string().max(200).optional() }));
   const code = (body.code ?? '').trim();
   if (!code) throw errors.badRequest('缺少授权码', 'OAUTH_CODE_MISSING');
 
@@ -397,14 +431,14 @@ app.post('/exchange', async (c) => {
 /** POST /api/auth/oauth/github/unbind — 解绑 GitHub（需密码验证，防止被盗号解绑后无法找回） */
 app.post('/github/unbind', requireAuth, async (c) => {
   const uid = c.get('user')!.id;
-  const body = (await c.req.json().catch(() => ({}))) as { password?: string };
-  if (!body.password) throw errors.badRequest('请输入密码以确认解绑', 'PASSWORD_REQUIRED');
+  const { password } = await parseJson(c, z.object({ password: z.string().max(128).optional() }));
+  if (!password) throw errors.badRequest('请输入密码以确认解绑', 'PASSWORD_REQUIRED');
 
   const row = await c.env.DB.prepare(`SELECT id, github_id, password_hash FROM users WHERE id = ?`).bind(uid)
     .first<{ id: string; github_id: string | null; password_hash: string }>();
   if (!row) throw errors.notFound('账号不存在');
   if (!row.github_id) throw errors.badRequest('当前账号未绑定 GitHub', 'GITHUB_NOT_BOUND');
-  if (!(await verifyPassword(body.password, row.password_hash))) {
+  if (!(await verifyPassword(password, row.password_hash))) {
     throw errors.badRequest('密码不正确', 'WRONG_PASSWORD');
   }
 
